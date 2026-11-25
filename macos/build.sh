@@ -30,10 +30,10 @@ else
 fi
 
 step "3/4 icon"
-if [[ ! -f "$OUT/AppIcon.icns" || macos/scripts/make-icon.swift -nt "$OUT/AppIcon.icns" ]]; then
+if [[ ! -f "$OUT/AppIcon.icns" || macos/AppIcon.png -nt "$OUT/AppIcon.icns" ]]; then
   ICONSET="$OUT/AppIcon.iconset"
   rm -rf "$ICONSET" && mkdir -p "$ICONSET"
-  swift macos/scripts/make-icon.swift "$OUT/icon-1024.png"
+  cp macos/AppIcon.png "$OUT/icon-1024.png"
   for s in 16 32 128 256 512; do
     sips -z $s $s "$OUT/icon-1024.png" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
     sips -z $((s*2)) $((s*2)) "$OUT/icon-1024.png" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
