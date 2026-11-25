@@ -64,6 +64,8 @@ final class Workspace: ObservableObject {
     @Published private(set) var openSceneId: String?
     @Published var inspector: InspectorTab?
     @Published private(set) var presenting = false
+    /// full screen hides the traffic lights and the rounded glass edge
+    @Published var isFullScreen = false
     @Published private(set) var appTheme: AppTheme = .system
     /// bumps (debounced) when the open scene's elements change
     @Published private(set) var editTick = 0

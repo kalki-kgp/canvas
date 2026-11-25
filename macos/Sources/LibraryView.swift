@@ -25,7 +25,7 @@ private struct LibrarySidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Color.clear.frame(height: 34)   // traffic lights
+            Color.clear.frame(height: ws.isFullScreen ? 8 : 34)   // traffic lights
             VStack(spacing: 2) {
                 SidebarRow(title: "All Scenes", symbol: "square.grid.2x2.fill", hue: 5,
                            count: ws.count(.all), isSelected: ws.filter == .all) { ws.filter = .all }

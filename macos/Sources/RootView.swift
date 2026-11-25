@@ -21,7 +21,14 @@ struct RootView: View {
         }
         .animation(Chrome.panelSlide, value: editing)
         .background {
-            if ws.presenting { Color.black } else { WindowGlass() }
+            if ws.presenting {
+                Color.black
+            } else if ws.isFullScreen {
+                // nothing shows through in full screen, so no glass and no rounded edge
+                Color(nsColor: .windowBackgroundColor)
+            } else {
+                WindowGlass()
+            }
         }
         .buttonBorderShape(.capsule)
         .frame(minWidth: 760, minHeight: 480)

@@ -125,6 +125,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         self.window = window
     }
 
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        // the empty toolbar that rounds the windowed corners would show as a blank strip
+        window?.toolbar = nil
+        workspace?.isFullScreen = true
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        guard let window else { return }
+        WindowChrome.configure(window)
+        WindowChrome.placeTrafficLights(on: window)
+        workspace?.isFullScreen = false
+        window.invalidateShadow()
+    }
+
     func windowDidResize(_ notification: Notification) {
         window?.invalidateShadow()
     }

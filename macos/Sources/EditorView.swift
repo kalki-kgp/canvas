@@ -57,7 +57,9 @@ private struct EditorBar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Color.clear.frame(width: 70)   // traffic lights
+            if !ws.isFullScreen {
+                Color.clear.frame(width: 70)   // traffic lights
+            }
             ChromeCircleButton(symbol: "chevron.left", help: "All Scenes (⇧⌘H)") { ws.goHome() }
             Text(verbatim: ws.openScene?.name ?? "")
                 .font(.system(size: 13.5, weight: .semibold))
