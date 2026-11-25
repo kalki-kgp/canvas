@@ -13,7 +13,7 @@ start=$(date +%s)
 step() { echo "[$(( $(date +%s) - start ))s] $*"; }
 
 step "1/4 web app"
-(cd canvas-app && npx vite build --logLevel warn)
+(cd canvas-app && npx vite build --logLevel error)
 
 step "2/4 swift"
 mkdir -p "$OUT"

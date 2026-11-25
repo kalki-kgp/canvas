@@ -66,7 +66,7 @@ export const Presenter = ({
         fit: "contain",
         animation: animate,
         lock: { scroll: true, zoom: true, overscroll: false },
-        offsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        offsets: { top: 28, right: 28, bottom: 28, left: 28 },
       });
     },
     [api],

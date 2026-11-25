@@ -1,3 +1,39 @@
+# Canvas
+
+Excalidraw as a native macOS app, with the things Excalidraw+ charges for rebuilt to run locally, and Claude wired in through MCP.
+
+- **Native shell.** A Swift/AppKit app using the system WebKit: no Electron, about 20 MB. It works offline, opens `.excalidraw` files from Finder, and has native save/open panels and a menu bar.
+- **Scenes dashboard.** Unlimited scenes with collections, stars, search, thumbnails, duplicate and export. Everything is stored in `~/Library/Application Support/Canvas`.
+- **Version history.** Snapshots are taken automatically every 5 minutes and when you leave a scene, and you can save named versions. Click a snapshot to preview it, then restore it (restoring can be undone).
+- **Presentation mode.** Frames are slides. Reorder them in the Slides panel, present full screen with the laser pointer, or export the slides to PDF.
+- **AI on your Claude Code login.** Text-to-diagram, wireframe-to-code, and a Claude panel that draws on the canvas. These run `claude -p`, so there's no API key and no per-call billing.
+- **MCP server.** Any Claude Code session can drive the open scene: `claude mcp add --scope user --transport http canvas http://127.0.0.1:41873/mcp --header "Authorization: Bearer <token>"`. In the app, *Canvas → Connect Claude Code…* copies the command with your token filled in.
+
+Everything from the open-source editor comes along too: frames, sticky notes, Mermaid, libraries, embeds, the laser pointer, the command palette, search, and all the export options.
+
+## Build
+
+```sh
+yarn install --frozen-lockfile    # once, at the repo root
+./macos/build.sh --install        # builds canvas-app + the Swift app, installs /Applications/Canvas.app
+```
+
+You need Node 18+ and the Xcode command line tools. The AI features need [Claude Code](https://claude.com/claude-code) installed and signed in.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `canvas-app/` | Web layer: dashboard, editor wiring, history, slides, AI, MCP tools |
+| `macos/` | Swift app: HTTP server, store, Claude runner, WebView, menus, build script |
+| `packages/`, `excalidraw-app/` | Upstream Excalidraw, untouched, so upstream merges stay clean |
+
+Live collaboration is being designed in [#1](https://github.com/kalki-kgp/canvas/issues/1).
+
+---
+
+*Upstream Excalidraw README follows.*
+
 <a href="https://excalidraw.com/" target="_blank" rel="noopener">
   <picture>
     <source media="(prefers-color-scheme: dark)" alt="Excalidraw" srcset="https://excalidraw.nyc3.cdn.digitaloceanspaces.com/github/excalidraw_github_cover_2_dark.png" />

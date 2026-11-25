@@ -346,6 +346,7 @@ export const Editor = ({
         scheduleSave();
       },
       startPresenting,
+      stopPresenting: () => setPresenting(null),
     });
     return () => setSession(null);
   }, [api, sceneId, flush, scheduleSave, startPresenting]);

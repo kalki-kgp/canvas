@@ -11,6 +11,7 @@ export type EditorSession = {
   getExtras: () => CanvasSceneExtras;
   setExtras: (patch: Partial<CanvasSceneExtras>) => void;
   startPresenting: (fromSlide?: number) => void;
+  stopPresenting: () => void;
 };
 
 let current: EditorSession | null = null;

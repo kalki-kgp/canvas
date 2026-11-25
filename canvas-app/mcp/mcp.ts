@@ -9,6 +9,7 @@ import {
   exportScene,
   getCommonBounds,
   getNonDeletedElements,
+  getVisibleSceneBounds,
   newElementWith,
 } from "@excalidraw/excalidraw";
 import { getDataURL } from "@excalidraw/excalidraw/data/blob";
@@ -135,6 +136,29 @@ const addToScene = (
   session.api.updateScene({
     elements: [...existing, ...added],
     captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+  });
+  revealIfOffscreen(session, added);
+};
+
+/** scrolls the user's view so newly added elements are visible */
+const revealIfOffscreen = (
+  session: EditorSession,
+  added: readonly ExcalidrawElement[],
+) => {
+  if (!added.length) {
+    return;
+  }
+  const [ax1, ay1, ax2, ay2] = getCommonBounds(added);
+  const [vx1, vy1, vx2, vy2] = getVisibleSceneBounds(session.api.getAppState());
+  // keep clear of the toolbar strip at the top
+  const margin = 80 / session.api.getAppState().zoom.value;
+  if (ax1 >= vx1 && ax2 <= vx2 && ay1 >= vy1 + margin && ay2 <= vy2) {
+    return;
+  }
+  session.api.setViewport({
+    target: getNonDeletedElements(session.api.getSceneElements()),
+    fit: "scale-down",
+    animation: true,
   });
 };
 
@@ -711,9 +735,14 @@ const tools: Tool[] = [
   },
   {
     name: "present",
-    description: "Start presentation mode in the app, from a slide index (0-based).",
-    inputSchema: obj({ from: { type: "number" } }),
-    async run({ from }) {
+    description:
+      "Start presentation mode in the app from a slide index (0-based), or stop it with stop: true.",
+    inputSchema: obj({ from: { type: "number" }, stop: { type: "boolean" } }),
+    async run({ from, stop }) {
+      if (stop) {
+        requireSession().stopPresenting();
+        return "Stopped presenting.";
+      }
       requireSession().startPresenting(from ?? 0);
       return "Presenting.";
     },

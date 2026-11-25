@@ -49,6 +49,13 @@ export default defineConfig({
     assetsInlineLimit: 0,
     chunkSizeWarningLimit: 4096,
     rollupOptions: {
+      onwarn(warning, warn) {
+        // React libs ship "use client" directives, irrelevant here
+        if (warning.code === "MODULE_LEVEL_DIRECTIVE") {
+          return;
+        }
+        warn(warning);
+      },
       output: {
         assetFileNames(chunkInfo) {
           if (chunkInfo?.name?.endsWith(".woff2")) {
