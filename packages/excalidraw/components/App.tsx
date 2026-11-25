@@ -5939,7 +5939,7 @@ class App extends React.Component<AppProps, AppState> {
 
     const initialScale = gesture.initialScale;
     if (initialScale) {
-      this.viewport.translate(
+      const didTranslate = this.viewport.translate(
         (state) => ({
           ...getViewportForZoomWithScrollConstraints(
             {
@@ -5949,12 +5949,19 @@ class App extends React.Component<AppProps, AppState> {
             },
             state,
           ),
+          // draw from zoom-scaled bitmaps while pinching, like wheel and
+          // touch zoom do; re-rasterizing every element on every gesture
+          // frame makes a trackpad pinch in Safari/WebKit stutter
+          shouldCacheIgnoreZoom: true,
         }),
         {
           zoomPreConstrained: true,
           preserveScrollConstraintsSnapBack: true,
         },
       );
+      if (didTranslate) {
+        this.resetShouldCacheIgnoreZoomDebounced();
+      }
     }
   });
 
