@@ -662,25 +662,36 @@ private struct ChatThreadView: View {
                                 .id("working")
                                 .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
                         }
+                        // a permission or a question arrives as the newest
+                        // item of the chat, which glides up to make room
+                        if let card = chat.pending.first {
+                            PendingCard(card: card)
+                                .id(card.id)
+                                .padding(.top, 2)
+                                .transition(.asymmetric(
+                                    insertion: .opacity.combined(with: .offset(y: 10)),
+                                    removal: .opacity))
+                        }
                     }
                     .animation(Chrome.panelSlide, value: chat.turns.count)
                     .animation(Chrome.panelSlide, value: chat.running)
+                    .animation(Chrome.panelSlide, value: chat.pending.first?.id)
                     .padding(.horizontal, 14)
                     .padding(.bottom, 12)
                 }
+                // keep the newest message in place when the space shrinks
+                // (a card or a taller composer): the chat glides up with it
+                .defaultScrollAnchor(.bottom, for: .sizeChanges)
                 .onAppear { proxy.scrollTo(chat.turns.last?.id, anchor: .bottom) }
                 .onChange(of: chat.turns.count) { _, _ in scrollDown(proxy) }
                 .onChange(of: chat.activity) { _, _ in scrollDown(proxy) }
-            }
-            if let card = chat.pending.first {
-                PendingCard(card: card)
-                    .id(card.id)
-                    .padding(.horizontal, 10)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                .onChange(of: chat.pending.first?.id) { _, _ in
+                    // once the card has its height, so it lands fully in view
+                    DispatchQueue.main.async { scrollDown(proxy) }
+                }
             }
             composer
         }
-        .animation(Chrome.panelSlide, value: chat.pending.map(\.id))
         .onAppear {
             // the web view holds keyboard focus; hand it to the composer
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
@@ -691,7 +702,8 @@ private struct ChatThreadView: View {
     }
 
     private func scrollDown(_ proxy: ScrollViewProxy) {
-        withAnimation { proxy.scrollTo(chat.running ? "working" : chat.turns.last?.id, anchor: .bottom) }
+        let target: String? = chat.pending.first?.id ?? (chat.running ? "working" : chat.turns.last?.id)
+        withAnimation(Chrome.panelSlide) { proxy.scrollTo(target, anchor: .bottom) }
     }
 
     private var composer: some View {
