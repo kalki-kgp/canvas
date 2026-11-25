@@ -14,7 +14,7 @@ final class WebBridge: NSObject, WKNavigationDelegate, WKUIDelegate,
     private weak var workspace: Workspace?
     private var loaded = false
     private var pendingEvents: [[String: Any]] = []
-    private var popups: [NSWindow] = []
+    var libraries: (sheet: NSWindow, web: WKWebView)?
 
     private var window: NSWindow? { webView.window ?? NSApp.mainWindow }
 
@@ -152,12 +152,7 @@ final class WebBridge: NSObject, WKNavigationDelegate, WKUIDelegate,
         let mainFrame = action.targetFrame?.isMainFrame ?? true
         if mainFrame, let url, Self.isLibrariesSite(url) {
             // the libraries site stays inside Canvas
-            if let open = popups.first, let popup = open.contentView as? WKWebView {
-                popup.load(action.request)
-                open.makeKeyAndOrderFront(nil)
-            } else {
-                makeLibrariesWindow().load(action.request)
-            }
+            showLibraries(action.request)
             return decisionHandler(.cancel)
         }
         if mainFrame, let url, !isApp(url), url.scheme != "about", url.scheme != "blob", url.scheme != "data" {
@@ -256,85 +251,111 @@ final class WebBridge: NSObject, WKNavigationDelegate, WKUIDelegate,
         alert.beginSheetModal(for: window!) { completionHandler($0 == .alertFirstButtonReturn ? field.stringValue : nil) }
     }
 
-    /// target=_blank: the excalidraw libraries site opens in an in-app window
-    /// so its "Add to Excalidraw" redirect can land back here; anything else
-    /// goes to the default browser.
+    /// target=_blank: the excalidraw libraries site opens in a sheet on the
+    /// Canvas window, and its "Add to Excalidraw" link lands back here;
+    /// anything else goes to the default browser.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let url = action.request.url else { return nil }
-        // the libraries site's "Add to Excalidraw" opens the app's
-        // `#addLibrary=` link in a new window: install it here instead
         if handlePopupNavigation(webView, url: url) { return nil }
         if Self.isLibrariesSite(url) {
-            if let open = popups.first, let popup = open.contentView as? WKWebView {
-                popup.load(action.request)
-                open.makeKeyAndOrderFront(nil)
-                return nil
-            }
-            return makeLibrariesWindow(configuration)
+            showLibraries(action.request)
+            return nil
         }
         NSWorkspace.shared.open(url)
         return nil
     }
 
+    func webViewDidClose(_ webView: WKWebView) {
+        if webView === libraries?.web { closeLibraries() }
+    }
+}
+
+// MARK: - Libraries sheet
+
+extension WebBridge {
     static func isLibrariesSite(_ url: URL) -> Bool {
         url.host?.hasSuffix("libraries.excalidraw.com") == true
     }
 
-    /// The in-app window the libraries site lives in.
-    @discardableResult
-    func makeLibrariesWindow(_ configuration: WKWebViewConfiguration? = nil) -> WKWebView {
-        let popup = WKWebView(frame: .zero, configuration: configuration ?? {
-            let config = WKWebViewConfiguration()
-            config.websiteDataStore = webView.configuration.websiteDataStore
-            config.processPool = webView.configuration.processPool
-            return config
-        }())
-        popup.navigationDelegate = self
-        popup.uiDelegate = self
-        let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 780),
-            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+    /// Shows the libraries site in a sheet over the Canvas window.
+    func showLibraries(_ request: URLRequest) {
+        if let libraries {
+            libraries.web.load(request)
+            return
+        }
+        guard let parent = webView.window else { return }
+
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = webView.configuration.websiteDataStore
+        config.processPool = webView.configuration.processPool
+        let web = WKWebView(frame: .zero, configuration: config)
+        web.navigationDelegate = self
+        web.uiDelegate = self
+        web.translatesAutoresizingMaskIntoConstraints = false
+
+        let done = NSButton(title: "Done", target: self, action: #selector(librariesDone))
+        done.bezelStyle = .push
+        done.keyEquivalent = "\u{1b}"
+        done.controlSize = .large
+        done.translatesAutoresizingMaskIntoConstraints = false
+
+        let title = NSTextField(labelWithString: "Libraries")
+        title.font = .systemFont(ofSize: 13, weight: .semibold)
+        title.translatesAutoresizingMaskIntoConstraints = false
+
+        let divider = NSBox()
+        divider.boxType = .separator
+        divider.translatesAutoresizingMaskIntoConstraints = false
+
+        let content = NSView()
+        [title, done, divider, web].forEach(content.addSubview)
+        NSLayoutConstraint.activate([
+            title.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
+            title.centerYAnchor.constraint(equalTo: done.centerYAnchor),
+            done.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
+            done.topAnchor.constraint(equalTo: content.topAnchor, constant: 10),
+            divider.topAnchor.constraint(equalTo: done.bottomAnchor, constant: 10),
+            divider.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            divider.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            web.topAnchor.constraint(equalTo: divider.bottomAnchor),
+            web.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            web.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            web.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+        ])
+
+        let size = parent.contentLayoutRect.size
+        let sheet = NSWindow(
+            contentRect: NSRect(x: 0, y: 0,
+                                width: min(1000, size.width - 60),
+                                height: min(720, size.height - 40)),
+            styleMask: [.titled, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false
         )
-        win.title = "Excalidraw Libraries"
-        win.contentView = popup
-        win.isReleasedWhenClosed = false
-        win.center()
-        // a closed window must not stay around as the link's named target
-        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: win, queue: .main) {
-            [weak self] note in
-            MainActor.assumeIsolated {
-                guard let win = note.object as? NSWindow else { return }
-                (win.contentView as? WKWebView)?.stopLoading()
-                win.contentView = nil
-                self?.popups.removeAll { $0 === win }
-            }
-        }
-        win.makeKeyAndOrderFront(nil)
-        popups.append(win)
-        return popup
+        sheet.titleVisibility = .hidden
+        sheet.titlebarAppearsTransparent = true
+        sheet.contentMinSize = NSSize(width: 560, height: 420)
+        sheet.contentView = content
+        libraries = (sheet, web)
+        web.load(request)
+        parent.beginSheet(sheet)
     }
 
-    func webViewDidClose(_ webView: WKWebView) {
-        popups.removeAll { win in
-            if win.contentView === webView { win.close(); return true }
-            return false
-        }
-    }
-}
+    @objc private func librariesDone() { closeLibraries() }
 
-/// Navigation inside the libraries popup: when it redirects back to the app
-/// (`…#addLibrary=…`), hand the hash to the main view and close the popup.
-extension WebBridge {
+    func closeLibraries() {
+        guard let (sheet, web) = libraries else { return }
+        libraries = nil
+        web.stopLoading()
+        if let parent = sheet.sheetParent { parent.endSheet(sheet) } else { sheet.orderOut(nil) }
+    }
+
+    /// Navigation inside the libraries sheet: when it links back to the app
+    /// (`…#addLibrary=…`), hand the hash to the editor and close the sheet.
     func handlePopupNavigation(_ webView: WKWebView, url: URL) -> Bool {
         guard webView !== self.webView, isApp(url), let fragment = url.fragment else { return false }
         self.webView.evaluateJavaScript("location.hash = \(Self.jsString(fragment))")
-        if let win = popups.first(where: { $0.contentView === webView }) {
-            win.close()
-            popups.removeAll { $0 === win }
-        }
-        window?.makeKeyAndOrderFront(nil)
+        closeLibraries()
         return true
     }
 }
