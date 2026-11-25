@@ -2,22 +2,25 @@ import AppKit
 import UniformTypeIdentifiers
 import WebKit
 
-/// The main window: a WKWebView on the local server, with native file
-/// panels, downloads, external links and a bridge for menus & MCP.
-final class WebController: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate,
+/// The editor page: a WKWebView on the local server, with native file
+/// panels, downloads, external links, and the bridge the window, menus and
+/// MCP talk to the page through.
+@MainActor
+final class WebBridge: NSObject, WKNavigationDelegate, WKUIDelegate,
     WKDownloadDelegate, WKScriptMessageHandler {
 
-    let window: NSWindow
     let webView: WKWebView
     private let appURL: URL
+    private weak var workspace: Workspace?
     private var loaded = false
     private var pendingEvents: [[String: Any]] = []
-    private var titleObservation: NSKeyValueObservation?
     private var popups: [NSWindow] = []
-    private var closingAfterFlush = false
 
-    init(appURL: URL, token: String, port: UInt16, version: String) {
+    private var window: NSWindow? { webView.window ?? NSApp.mainWindow }
+
+    init(appURL: URL, token: String, port: UInt16, version: String, workspace: Workspace) {
         self.appURL = appURL
+        self.workspace = workspace
 
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
@@ -30,39 +33,14 @@ final class WebController: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
 
         webView = WKWebView(frame: .zero, configuration: config)
         webView.setValue(false, forKey: "drawsBackground")
-        if #available(macOS 13.3, *) { webView.isInspectable = true }
+        webView.isInspectable = true
         webView.allowsMagnification = false
         webView.allowsBackForwardNavigationGestures = false
-
-        window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "Canvas"
-        window.titlebarAppearsTransparent = false
-        window.minSize = NSSize(width: 640, height: 420)
-        window.tabbingMode = .disallowed
-        window.collectionBehavior.insert(.fullScreenPrimary)
-        window.contentView = webView
-        window.setFrameAutosaveName("CanvasMainWindow")
-        if !window.setFrameUsingName("CanvasMainWindow") { window.center() }
-        window.backgroundColor = NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                ? NSColor(calibratedWhite: 0.07, alpha: 1) : .white
-        }
 
         super.init()
         config.userContentController.add(self, name: "canvas")
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        window.delegate = self
-        titleObservation = webView.observe(\.title, options: [.new]) { [weak self] view, _ in
-            let title = view.title ?? ""
-            self?.window.title = title.isEmpty ? "Canvas" : title
-        }
-
         webView.load(URLRequest(url: appURL))
     }
 
@@ -85,6 +63,19 @@ final class WebController: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
     }
 
     func menu(_ action: String) { dispatch(["type": "menu", "action": action]) }
+
+    /// Calls `window.canvasBridge.call(fn, args)`; the page answers in JSON.
+    @discardableResult
+    func bridge(_ fn: String, _ args: [Any]) async throws -> Any? {
+        let result = try await webView.callAsyncJavaScript(
+            "if (!window.canvasBridge) throw new Error('Canvas is still loading'); return await window.canvasBridge.call(fn, args);",
+            arguments: ["fn": fn, "args": args.map { $0 is NSNull ? NSNull() : $0 }],
+            contentWorld: .page
+        )
+        guard let text = result as? String, let data = text.data(using: .utf8) else { return nil }
+        let value = try JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)
+        return value is NSNull ? nil : value
+    }
 
     func callMCP(_ body: String, completion: @escaping (Result<String, Error>) -> Void) {
         webView.callAsyncJavaScript(
@@ -137,21 +128,10 @@ final class WebController: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         switch type {
         case "fullscreen":
             let on = body["on"] as? Bool ?? false
-            if window.styleMask.contains(.fullScreen) != on { window.toggleFullScreen(nil) }
+            if let window, window.styleMask.contains(.fullScreen) != on { window.toggleFullScreen(nil) }
         default:
-            break
+            workspace?.receive(body)
         }
-    }
-
-    // MARK: NSWindowDelegate
-
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
-        if closingAfterFlush { return true }
-        flush { [weak self] in
-            self?.closingAfterFlush = true
-            self?.window.close()
-        }
-        return false
     }
 
     // MARK: WKNavigationDelegate
@@ -212,7 +192,7 @@ final class WebController: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         panel.nameFieldStringValue = suggestedFilename
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
-        panel.beginSheetModal(for: window) { response in
+        panel.beginSheetModal(for: window!) { response in
             guard response == .OK, let url = panel.url else { return completionHandler(nil) }
             try? FileManager.default.removeItem(at: url)
             completionHandler(url)
@@ -231,7 +211,7 @@ final class WebController: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         panel.allowsMultipleSelection = parameters.allowsMultipleSelection
         panel.canChooseDirectories = parameters.allowsDirectories
         panel.canChooseFiles = true
-        panel.beginSheetModal(for: window) { response in
+        panel.beginSheetModal(for: window!) { response in
             completionHandler(response == .OK ? panel.urls : nil)
         }
     }
@@ -241,7 +221,7 @@ final class WebController: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         let alert = NSAlert()
         alert.messageText = message
         alert.addButton(withTitle: "OK")
-        alert.beginSheetModal(for: window) { _ in completionHandler() }
+        alert.beginSheetModal(for: window!) { _ in completionHandler() }
     }
 
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
@@ -250,7 +230,7 @@ final class WebController: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         alert.messageText = message
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { completionHandler($0 == .alertFirstButtonReturn) }
+        alert.beginSheetModal(for: window!) { completionHandler($0 == .alertFirstButtonReturn) }
     }
 
     func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String,
@@ -263,7 +243,7 @@ final class WebController: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         alert.accessoryView = field
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { completionHandler($0 == .alertFirstButtonReturn ? field.stringValue : nil) }
+        alert.beginSheetModal(for: window!) { completionHandler($0 == .alertFirstButtonReturn ? field.stringValue : nil) }
     }
 
     /// target=_blank: the excalidraw libraries site opens in an in-app window
@@ -303,7 +283,7 @@ final class WebController: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
 
 /// Navigation inside the libraries popup: when it redirects back to the app
 /// (`…#addLibrary=…`), hand the hash to the main view and close the popup.
-extension WebController {
+extension WebBridge {
     func handlePopupNavigation(_ webView: WKWebView, url: URL) -> Bool {
         guard webView !== self.webView, isApp(url), let fragment = url.fragment else { return false }
         self.webView.evaluateJavaScript("location.hash = \(Self.jsString(fragment))")
@@ -311,7 +291,7 @@ extension WebController {
             win.close()
             popups.removeAll { $0 === win }
         }
-        window.makeKeyAndOrderFront(nil)
+        window?.makeKeyAndOrderFront(nil)
         return true
     }
 }

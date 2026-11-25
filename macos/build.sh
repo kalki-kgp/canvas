@@ -17,12 +17,12 @@ step "1/4 web app"
 
 step "2/4 swift"
 mkdir -p "$OUT"
-swiftc -O -target arm64-apple-macos13.0 \
-  -framework AppKit -framework WebKit -framework Network -framework PDFKit -framework Security \
+swiftc -O -swift-version 5 -target arm64-apple-macos26.0 \
+  -framework AppKit -framework SwiftUI -framework WebKit -framework Network -framework PDFKit -framework Security \
   macos/Sources/*.swift -o "$OUT/Canvas-arm64"
 if [[ "${UNIVERSAL:-0}" == 1 ]]; then
-  swiftc -O -target x86_64-apple-macos13.0 \
-    -framework AppKit -framework WebKit -framework Network -framework PDFKit -framework Security \
+  swiftc -O -swift-version 5 -target x86_64-apple-macos26.0 \
+    -framework AppKit -framework SwiftUI -framework WebKit -framework Network -framework PDFKit -framework Security \
     macos/Sources/*.swift -o "$OUT/Canvas-x86_64"
   lipo -create "$OUT/Canvas-arm64" "$OUT/Canvas-x86_64" -output "$OUT/Canvas-bin"
 else

@@ -12,7 +12,7 @@ final class Routes {
     let store: Store
     let claude: ClaudeRunner
     /// set once the window exists; MCP calls are forwarded to the page
-    weak var web: WebController?
+    weak var web: WebBridge?
 
     init(port: UInt16, token: String, webRoot: URL, store: Store, claude: ClaudeRunner) {
         self.port = port
@@ -209,7 +209,7 @@ final class Routes {
                     res.text(500, error.localizedDescription)
                 }
             }
-            if let window = self?.web?.window {
+            if let window = self?.web?.webView.window {
                 panel.beginSheetModal(for: window, completionHandler: done)
             } else {
                 done(panel.runModal())

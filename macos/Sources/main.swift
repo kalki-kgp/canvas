@@ -1,15 +1,20 @@
 import AppKit
 import Security
+import SwiftUI
 
 let PORT: UInt16 = {
     if let raw = ProcessInfo.processInfo.environment["CANVAS_PORT"], let p = UInt16(raw) { return p }
     return 41873
 }()
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var server: HTTPServer?
     private var routes: Routes?
-    private var web: WebController?
+    private var web: WebBridge?
+    private var workspace: Workspace?
+    private var window: NSWindow?
+    private var closingAfterFlush = false
     private var token = ""
     private var pendingOpen: [URL] = []
     private var terminating = false
@@ -54,7 +59,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             webRoot = Bundle.main.resourceURL!.appendingPathComponent("web")
         }
         let appURL = URL(string: "http://127.0.0.1:\(PORT)/")!
-        let store = Store(root: supportDir.appendingPathComponent("data"))
+        let dataDir = supportDir.appendingPathComponent("data")
+        let store = Store(root: dataDir)
         let claude = ClaudeRunner(
             workDir: supportDir.appendingPathComponent("claude"),
             mcpURL: "http://127.0.0.1:\(PORT)/mcp",
@@ -76,10 +82,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         self.server = server
 
-        let web = WebController(appURL: appURL, token: token, port: PORT, version: version)
+        let workspace = Workspace(dataDir: dataDir, claude: claude)
+        let web = WebBridge(appURL: appURL, token: token, port: PORT, version: version, workspace: workspace)
+        workspace.web = web
         routes.web = web
         self.web = web
-        web.window.makeKeyAndOrderFront(nil)
+        self.workspace = workspace
+        showWindow(workspace: workspace, web: web)
         if !pendingOpen.isEmpty {
             web.openFiles(pendingOpen)
             pendingOpen = []
@@ -87,10 +96,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    private func showWindow(workspace: Workspace, web: WebBridge) {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        WindowChrome.configure(window)
+        window.title = "Canvas"
+        window.isMovableByWindowBackground = true
+        window.isReleasedWhenClosed = false
+        window.tabbingMode = .disallowed
+        window.collectionBehavior.insert(.fullScreenPrimary)
+        window.minSize = NSSize(width: 760, height: 480)
+        window.delegate = self
+
+        let root = RootView(ws: workspace, webView: web.webView)
+        let frame = NSRect(origin: .zero, size: window.frame.size)
+        let hosting = WindowHostingView(rootView: AnyView(root))
+        hosting.frame = frame
+        let container = NSView(frame: frame)
+        container.addSubview(hosting)
+        window.contentView = container
+
+        window.setFrameAutosaveName("CanvasMainWindow")
+        if !window.setFrameUsingName("CanvasMainWindow") { window.center() }
+        window.makeKeyAndOrderFront(nil)
+        WindowChrome.placeTrafficLights(on: window)
+        DispatchQueue.main.async { window.invalidateShadow() }
+        self.window = window
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        window?.invalidateShadow()
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if closingAfterFlush { return true }
+        web?.flush { [weak self] in
+            self?.closingAfterFlush = true
+            self?.window?.close()
+        }
+        return false
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         if let web {
             web.openFiles(urls)
-            web.window.makeKeyAndOrderFront(nil)
+            window?.makeKeyAndOrderFront(nil)
         } else {
             pendingOpen.append(contentsOf: urls)
         }
@@ -106,29 +157,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { web?.window.makeKeyAndOrderFront(nil) }
+        if !flag { window?.makeKeyAndOrderFront(nil) }
         return true
     }
 
     // MARK: menu actions
 
-    @objc func newScene(_ sender: Any?) { web?.menu("new-scene") }
-    @objc func showDashboard(_ sender: Any?) { web?.menu("dashboard") }
-    @objc func present(_ sender: Any?) { web?.menu("present") }
-    @objc func showHistory(_ sender: Any?) { web?.menu("history") }
-    @objc func showClaude(_ sender: Any?) { web?.menu("claude") }
+    @objc func newScene(_ sender: Any?) { workspace?.newScene() }
+    @objc func newCollection(_ sender: Any?) { workspace?.goHome(); workspace?.newCollection() }
+    @objc func showDashboard(_ sender: Any?) { workspace?.goHome() }
+    @objc func present(_ sender: Any?) { if workspace?.openSceneId != nil { workspace?.run("present", 0) } }
+    @objc func showSlides(_ sender: Any?) { if workspace?.openSceneId != nil { workspace?.toggleInspector(.slides) } }
+    @objc func showHistory(_ sender: Any?) { if workspace?.openSceneId != nil { workspace?.toggleInspector(.history) } }
+    @objc func showClaude(_ sender: Any?) { if workspace?.openSceneId != nil { workspace?.toggleInspector(.claude) } }
     @objc func saveVersion(_ sender: Any?) { web?.menu("save-version") }
     @objc func reloadPage(_ sender: Any?) { web?.webView.reload() }
-
-    @objc func importFiles(_ sender: Any?) {
-        guard let web else { return }
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
-        panel.beginSheetModal(for: web.window) { response in
-            if response == .OK { web.openFiles(panel.urls) }
-        }
-    }
+    @objc func importFiles(_ sender: Any?) { workspace?.importFiles() }
 
     @objc func connectClaudeCode(_ sender: Any?) {
         let command = "claude mcp add --scope user --transport http canvas http://127.0.0.1:\(PORT)/mcp --header \"Authorization: Bearer \(token)\""
@@ -143,7 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSPasteboard.general.setString(command, forType: .string)
             }
         }
-        if let window = web?.window {
+        if let window {
             alert.beginSheetModal(for: window, completionHandler: handle)
         } else {
             handle(alert.runModal())
@@ -190,6 +234,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         submenu("File", [
             item("New Scene", #selector(newScene(_:)), "n", target: self),
+            item("New Collection", #selector(newCollection(_:)), "n", [.command, .shift], target: self),
             item("All Scenes", #selector(showDashboard(_:)), "h", [.command, .shift], target: self),
             .separator(),
             item("Import…", #selector(importFiles(_:)), target: self),
@@ -210,8 +255,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         submenu("View", [
             item("Present", #selector(present(_:)), "p", [.command, .option], target: self),
-            item("Version History", #selector(showHistory(_:)), target: self),
-            item("Claude", #selector(showClaude(_:)), target: self),
+            item("Slides", #selector(showSlides(_:)), "1", [.command, .option], target: self),
+            item("Version History", #selector(showHistory(_:)), "2", [.command, .option], target: self),
+            item("Claude", #selector(showClaude(_:)), "3", [.command, .option], target: self),
             .separator(),
             item("Reload", #selector(reloadPage(_:)), "r", [.command, .option], target: self),
             item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),
@@ -230,7 +276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 let app = NSApplication.shared
-let delegate = AppDelegate()
+let delegate = MainActor.assumeIsolated { AppDelegate() }
 app.delegate = delegate
 app.setActivationPolicy(.regular)
 app.run()
