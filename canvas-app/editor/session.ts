@@ -1,7 +1,7 @@
 // The currently open editor, for things outside React (MCP tools, menus).
 
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
-import type { CanvasSceneExtras } from "../data/store";
+import type { CanvasSceneExtras, SceneDoc } from "../data/store";
 
 export type EditorSession = {
   sceneId: string;
@@ -10,6 +10,10 @@ export type EditorSession = {
   flush: () => Promise<void>;
   getExtras: () => CanvasSceneExtras;
   setExtras: (patch: Partial<CanvasSceneExtras>) => void;
+  /** writes the current state as a (labelled) version */
+  saveVersion: (label?: string) => Promise<void>;
+  /** replaces the scene with a saved version, undoably */
+  restore: (doc: SceneDoc) => Promise<void>;
   startPresenting: (fromSlide?: number) => void;
   stopPresenting: () => void;
 };

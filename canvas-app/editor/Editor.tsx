@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  DefaultSidebar,
   Excalidraw,
   MainMenu,
-  Sidebar,
   THEME,
   TTDDialogTrigger,
   WelcomeScreen,
@@ -20,7 +18,6 @@ import {
 } from "@excalidraw/excalidraw/components/CommandPalette/CommandPalette";
 import { OverwriteConfirmDialog } from "@excalidraw/excalidraw/components/OverwriteConfirm/OverwriteConfirm";
 import {
-  MagicIcon,
   PlusIcon,
   brainIcon,
   chevronLeftIcon,
@@ -48,14 +45,10 @@ import {
   updateSceneMeta,
   useIndex,
 } from "../data/store";
-import { onNativeEvent } from "../data/native";
+import { onNativeEvent, postNative } from "../data/native";
 
 import { AIComponents } from "./AI";
-import { ClaudePanel } from "./ClaudePanel";
-import { ConnectClaudeDialog } from "./ConnectClaudeDialog";
-import { HistoryPanel } from "./HistoryPanel";
 import { Presenter } from "./Presenter";
-import { SlidesPanel } from "./SlidesPanel";
 import { setSession } from "./session";
 
 import type { AppSettings } from "../App";
@@ -72,11 +65,9 @@ const SAVE_DEBOUNCE_MS = 400;
 const THUMB_DEBOUNCE_MS = 2500;
 const SNAPSHOT_EVERY_MS = 5 * 60 * 1000;
 
-export const SIDEBAR_TABS = {
-  slides: "canvas-slides",
-  history: "canvas-history",
-  claude: "canvas-claude",
-} as const;
+/** asks the window to show one of its side panels */
+const openPanel = (tab: "slides" | "history" | "claude") =>
+  postNative("inspector", { tab });
 
 const buildDoc = (
   elements: readonly ExcalidrawElement[],
@@ -132,7 +123,6 @@ export const Editor = ({
   const [missing, setMissing] = useState(false);
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [presenting, setPresenting] = useState<{ from: number } | null>(null);
-  const [connectOpen, setConnectOpen] = useState(false);
   const meta = useIndex().scenes.find((s) => s.id === sceneId);
 
   const extrasRef = useRef<CanvasSceneExtras>({});
@@ -297,6 +287,7 @@ export const Editor = ({
         lastKeyRef.current = key;
         pendingRef.current = { elements, appState, files };
         scheduleSave();
+        postNative("changed", { sceneId });
       }
       // the export dialog lets you rename the scene
       const current = getSceneMeta(sceneId);
@@ -328,6 +319,59 @@ export const Editor = ({
   }, []);
 
   useEffect(() => {
+    postNative("presenting", { on: !!presenting });
+  }, [presenting]);
+
+  const saveVersion = useCallback(
+    (label?: string) => {
+      if (!api) {
+        return Promise.resolve();
+      }
+      // the current state becomes the newest snapshot
+      pendingRef.current = {
+        elements: api.getSceneElements(),
+        appState: api.getAppState(),
+        files: api.getFiles(),
+      };
+      window.clearTimeout(saveTimerRef.current);
+      savingRef.current = savingRef.current.then(async () => {
+        const pending = pendingRef.current!;
+        pendingRef.current = null;
+        const doc = buildDoc(pending.elements, pending.appState, extrasRef.current);
+        await saveFiles(pending.files);
+        await saveSceneDoc(sceneId, doc);
+        await saveSnapshot(sceneId, doc, label);
+        lastSnapshotAtRef.current = Date.now();
+        dirtySinceSnapshotRef.current = false;
+      });
+      return savingRef.current;
+    },
+    [api, sceneId],
+  );
+
+  const restore = useCallback(
+    async (doc: SceneDoc) => {
+      if (!api) {
+        return;
+      }
+      await flush({ forceSnapshot: true });
+      const files = await loadFiles(fileIdsOf(doc.elements));
+      api.addFiles(Object.values(files));
+      extrasRef.current = doc.canvas ?? {};
+      api.updateScene({
+        elements: doc.elements,
+        appState: {
+          viewBackgroundColor:
+            doc.appState.viewBackgroundColor ??
+            api.getAppState().viewBackgroundColor,
+        },
+        captureUpdate: "IMMEDIATELY",
+      });
+    },
+    [api, flush],
+  );
+
+  useEffect(() => {
     if (!api) {
       return;
     }
@@ -345,11 +389,13 @@ export const Editor = ({
         };
         scheduleSave();
       },
+      saveVersion,
+      restore,
       startPresenting,
       stopPresenting: () => setPresenting(null),
     });
     return () => setSession(null);
-  }, [api, sceneId, flush, scheduleSave, startPresenting]);
+  }, [api, sceneId, flush, scheduleSave, startPresenting, saveVersion, restore]);
 
   useHandleLibrary({ excalidrawAPI: api, adapter: libraryAdapter });
 
@@ -357,13 +403,6 @@ export const Editor = ({
     const created = await createScene({ collectionId: meta?.collectionId });
     navigate({ view: "scene", id: created.id });
   }, [meta?.collectionId]);
-
-  const openTab = useCallback(
-    (tab: string) => {
-      api?.toggleSidebar({ name: "default", tab, force: true });
-    },
-    [api],
-  );
 
   useEffect(
     () =>
@@ -375,19 +414,14 @@ export const Editor = ({
           case "present":
             startPresenting(0);
             break;
-          case "history":
-            openTab(SIDEBAR_TABS.history);
-            break;
-          case "claude":
-            openTab(SIDEBAR_TABS.claude);
-            break;
           case "save-version":
-            flush({ forceSnapshot: true });
-            api?.setToast({ message: "Version saved", duration: 1500 });
+            saveVersion().then(() =>
+              api?.setToast({ message: "Version saved", duration: 1500 }),
+            );
             break;
         }
       }),
-    [api, flush, openTab, startPresenting],
+    [api, saveVersion, startPresenting],
   );
 
   const commandItems = useMemo(
@@ -418,24 +452,24 @@ export const Editor = ({
         category: DEFAULT_CATEGORIES.app,
         icon: presentationIcon,
         keywords: ["presentation", "frames", "order", "pdf"],
-        perform: () => openTab(SIDEBAR_TABS.slides),
+        perform: () => openPanel("slides"),
       },
       {
         label: "Version history",
         category: DEFAULT_CATEGORIES.app,
         icon: historyIcon,
         keywords: ["versions", "snapshots", "restore", "revert"],
-        perform: () => openTab(SIDEBAR_TABS.history),
+        perform: () => openPanel("history"),
       },
       {
         label: "Ask Claude",
         category: DEFAULT_CATEGORIES.app,
         icon: brainIcon,
         keywords: ["ai", "agent", "claude", "generate"],
-        perform: () => openTab(SIDEBAR_TABS.claude),
+        perform: () => openPanel("claude"),
       },
     ],
-    [newScene, openTab, startPresenting],
+    [newScene, startPresenting],
   );
 
   if (missing) {
@@ -476,30 +510,8 @@ export const Editor = ({
             });
           }
         }}
-        renderTopRightUI={(isMobile) =>
-          isMobile ? null : (
-            <button
-              className="canvas-present-button"
-              title="Present (frames as slides)"
-              onClick={() => startPresenting(0)}
-            >
-              {playerPlayIcon}
-              <span>Present</span>
-            </button>
-          )
-        }
       >
         <MainMenu>
-          <MainMenu.Item
-            icon={chevronLeftIcon}
-            onSelect={() => navigate({ view: "dashboard" })}
-          >
-            All scenes
-          </MainMenu.Item>
-          <MainMenu.Item icon={PlusIcon} onSelect={newScene}>
-            New scene
-          </MainMenu.Item>
-          <MainMenu.Separator />
           <MainMenu.DefaultItems.LoadScene />
           <MainMenu.DefaultItems.SaveToActiveFile />
           <MainMenu.DefaultItems.Export />
@@ -508,28 +520,6 @@ export const Editor = ({
           <MainMenu.DefaultItems.SearchMenu />
           <MainMenu.DefaultItems.Help />
           <MainMenu.DefaultItems.ClearCanvas />
-          <MainMenu.Separator />
-          <MainMenu.Item
-            icon={playerPlayIcon}
-            onSelect={() => startPresenting(0)}
-          >
-            Present
-          </MainMenu.Item>
-          <MainMenu.Item
-            icon={historyIcon}
-            onSelect={() => openTab(SIDEBAR_TABS.history)}
-          >
-            Version history
-          </MainMenu.Item>
-          <MainMenu.Item
-            icon={brainIcon}
-            onSelect={() => openTab(SIDEBAR_TABS.claude)}
-          >
-            Ask Claude
-          </MainMenu.Item>
-          <MainMenu.Item icon={MagicIcon} onSelect={() => setConnectOpen(true)}>
-            Connect Claude Code…
-          </MainMenu.Item>
           <MainMenu.Separator />
           <MainMenu.DefaultItems.Preferences />
           <MainMenu.DefaultItems.ToggleTheme
@@ -557,15 +547,9 @@ export const Editor = ({
               <WelcomeScreen.Center.MenuItemLoadScene />
               <WelcomeScreen.Center.MenuItem
                 icon={brainIcon}
-                onSelect={() => openTab(SIDEBAR_TABS.claude)}
+                onSelect={() => openPanel("claude")}
               >
                 Ask Claude to draw
-              </WelcomeScreen.Center.MenuItem>
-              <WelcomeScreen.Center.MenuItem
-                icon={chevronLeftIcon}
-                onSelect={() => navigate({ view: "dashboard" })}
-              >
-                All scenes
               </WelcomeScreen.Center.MenuItem>
               <WelcomeScreen.Center.MenuItemHelp />
             </WelcomeScreen.Center.Menu>
@@ -576,89 +560,6 @@ export const Editor = ({
           <OverwriteConfirmDialog.Actions.ExportToImage />
           <OverwriteConfirmDialog.Actions.SaveToDisk />
         </OverwriteConfirmDialog>
-
-        <DefaultSidebar>
-          <DefaultSidebar.TabTriggers>
-            <Sidebar.TabTrigger tab={SIDEBAR_TABS.slides} title="Slides">
-              {presentationIcon}
-            </Sidebar.TabTrigger>
-            <Sidebar.TabTrigger tab={SIDEBAR_TABS.history} title="Version history">
-              {historyIcon}
-            </Sidebar.TabTrigger>
-            <Sidebar.TabTrigger tab={SIDEBAR_TABS.claude} title="Claude">
-              {brainIcon}
-            </Sidebar.TabTrigger>
-          </DefaultSidebar.TabTriggers>
-          <Sidebar.Tab tab={SIDEBAR_TABS.slides}>
-            {api && (
-              <SlidesPanel
-                api={api}
-                getExtras={() => extrasRef.current}
-                setSlides={(slides) => {
-                  extrasRef.current = { ...extrasRef.current, slides };
-                  pendingRef.current = {
-                    elements: api.getSceneElements(),
-                    appState: api.getAppState(),
-                    files: api.getFiles(),
-                  };
-                  scheduleSave();
-                }}
-                sceneName={meta?.name || "Untitled"}
-                onPresent={startPresenting}
-              />
-            )}
-          </Sidebar.Tab>
-          <Sidebar.Tab tab={SIDEBAR_TABS.history}>
-            {api && (
-              <HistoryPanel
-                api={api}
-                sceneId={sceneId}
-                saveVersion={(label) => {
-                  // make the current state the newest snapshot first
-                  pendingRef.current = {
-                    elements: api.getSceneElements(),
-                    appState: api.getAppState(),
-                    files: api.getFiles(),
-                  };
-                  window.clearTimeout(saveTimerRef.current);
-                  savingRef.current = savingRef.current.then(async () => {
-                    const pending = pendingRef.current!;
-                    pendingRef.current = null;
-                    const doc = buildDoc(
-                      pending.elements,
-                      pending.appState,
-                      extrasRef.current,
-                    );
-                    await saveFiles(pending.files);
-                    await saveSceneDoc(sceneId, doc);
-                    await saveSnapshot(sceneId, doc, label);
-                    lastSnapshotAtRef.current = Date.now();
-                    dirtySinceSnapshotRef.current = false;
-                  });
-                  return savingRef.current;
-                }}
-                restore={async (doc) => {
-                  await flush({ forceSnapshot: true });
-                  const files = await loadFiles(fileIdsOf(doc.elements));
-                  api.addFiles(Object.values(files));
-                  extrasRef.current = doc.canvas ?? {};
-                  api.updateScene({
-                    elements: doc.elements,
-                    appState: {
-                      viewBackgroundColor:
-                        doc.appState.viewBackgroundColor ??
-                        api.getAppState().viewBackgroundColor,
-                    },
-                    captureUpdate: "IMMEDIATELY",
-                  });
-                }}
-              />
-            )}
-          </Sidebar.Tab>
-          <Sidebar.Tab tab={SIDEBAR_TABS.claude}>
-            {api && <ClaudePanel api={api} sceneId={sceneId} />}
-          </Sidebar.Tab>
-        </DefaultSidebar>
 
         {api && <AIComponents excalidrawAPI={api} />}
         <TTDDialogTrigger />
@@ -673,10 +574,6 @@ export const Editor = ({
           startAt={presenting.from}
           onExit={() => setPresenting(null)}
         />
-      )}
-
-      {connectOpen && (
-        <ConnectClaudeDialog onClose={() => setConnectOpen(false)} />
       )}
     </div>
   );

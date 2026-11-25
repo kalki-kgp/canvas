@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { THEME, defaultLang, languages } from "@excalidraw/excalidraw";
 
-import { Dashboard } from "./dashboard/Dashboard";
+import { installBridge, setBridgeThemeSetter } from "./bridge";
 import { Editor } from "./editor/Editor";
 import { importSceneFile } from "./data/importExport";
-import { flushPendingNativeEvents, onNativeEvent } from "./data/native";
+import { flushPendingNativeEvents, onNativeEvent, postNative } from "./data/native";
 import { createScene, loadIndex, loadPrefs, savePrefs } from "./data/store";
 import { installMCP } from "./mcp/mcp";
 
@@ -12,7 +12,7 @@ import type { Prefs } from "./data/store";
 import type { Theme } from "@excalidraw/element/types";
 
 // ---------------------------------------------------------------------------
-// routing: "/" is the dashboard, "/scene/<id>" an open scene. Paths, not
+// routing: "/" is the scenes library (drawn by the native window), "/scene/<id>" an open scene. Paths, not
 // hashes, so that excalidraw's `#addLibrary=` links keep working anywhere.
 // ---------------------------------------------------------------------------
 
@@ -140,9 +140,27 @@ export const App = () => {
     Promise.all([loadIndex(), loadPrefs()])
       .then(([, p]) => setPrefs(p))
       .catch((error) => console.error("failed to load workspace", error))
-      .finally(() => setReady(true));
+      .finally(() => {
+        installBridge();
+        setReady(true);
+      });
     installMCP();
   }, []);
+
+  setBridgeThemeSetter(settings.setAppTheme);
+
+  useEffect(() => {
+    postNative("theme", {
+      appTheme: settings.appTheme,
+      editorTheme: settings.editorTheme,
+    });
+  }, [settings.appTheme, settings.editorTheme]);
+
+  useEffect(() => {
+    if (ready) {
+      postNative("route", { sceneId: route.view === "scene" ? route.id : null });
+    }
+  }, [ready, route]);
 
   // menu bar items and files opened from Finder
   useEffect(() => {
@@ -174,7 +192,5 @@ export const App = () => {
 
   return route.view === "scene" ? (
     <Editor key={route.id} sceneId={route.id} settings={settings} />
-  ) : (
-    <Dashboard settings={settings} />
-  );
+  ) : null;
 };

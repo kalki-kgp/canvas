@@ -2,8 +2,8 @@
 
 Excalidraw as a native macOS app, with the things Excalidraw+ charges for rebuilt to run locally, and Claude wired in through MCP.
 
-- **Native shell.** A Swift/AppKit app using the system WebKit: no Electron, about 20 MB. It works offline, opens `.excalidraw` files from Finder, and has native save/open panels and a menu bar.
-- **Scenes dashboard.** Unlimited scenes with collections, stars, search, thumbnails, duplicate and export. Everything is stored in `~/Library/Application Support/Canvas`.
+- **Native app.** A SwiftUI/AppKit window in Liquid Glass, with Excalidraw's canvas in the system WebKit: no Electron, about 20 MB. It works offline, opens `.excalidraw` files from Finder, and has native panels, sheets and a menu bar.
+- **Scenes library.** Unlimited scenes with collections (drag a scene onto one), stars, search, thumbnails, duplicate and export. Everything is stored in `~/Library/Application Support/Canvas`.
 - **Version history.** Snapshots are taken automatically every 5 minutes and when you leave a scene, and you can save named versions. Click a snapshot to preview it, then restore it (restoring can be undone).
 - **Presentation mode.** Frames are slides. Reorder them in the Slides panel, present full screen with the laser pointer, or export the slides to PDF.
 - **AI on your Claude Code login.** Text-to-diagram, wireframe-to-code, and a Claude panel that draws on the canvas. These run `claude -p`, so there's no API key and no per-call billing.
@@ -18,14 +18,14 @@ yarn install --frozen-lockfile    # once, at the repo root
 ./macos/build.sh --install        # builds canvas-app + the Swift app, installs /Applications/Canvas.app
 ```
 
-You need Node 18+ and the Xcode command line tools. The AI features need [Claude Code](https://claude.com/claude-code) installed and signed in.
+You need macOS 26, Node 18+ and the Xcode command line tools. The AI features need [Claude Code](https://claude.com/claude-code) installed and signed in.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `canvas-app/` | Web layer: dashboard, editor wiring, history, slides, AI, MCP tools |
-| `macos/` | Swift app: HTTP server, store, Claude runner, WebView, menus, build script |
+| `canvas-app/` | Web layer: the editor, its store, presenter, AI dialogs, MCP tools, and the bridge the window calls |
+| `macos/` | Swift app: the window (library, toolbar, Slides / History / Claude panels), HTTP server, store, Claude runner, build script |
 | `packages/`, `excalidraw-app/` | Upstream Excalidraw, untouched, so upstream merges stay clean |
 
 Live collaboration is being designed in [#1](https://github.com/kalki-kgp/canvas/issues/1).

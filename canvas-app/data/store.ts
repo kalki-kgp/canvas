@@ -94,6 +94,13 @@ export const loadIndex = async () => {
 
 export const getIndex = () => index;
 
+export const subscribeIndex = (fn: () => void) => {
+  subscribers.add(fn);
+  return () => {
+    subscribers.delete(fn);
+  };
+};
+
 export const useIndex = () =>
   useSyncExternalStore(
     (fn) => {
