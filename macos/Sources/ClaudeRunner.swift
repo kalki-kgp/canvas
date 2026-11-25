@@ -10,6 +10,9 @@ final class ClaudeRunner {
         let image: String?        // data URL
         let sessionId: String?
         let model: String?
+        var chatId: String? = nil
+        var effort: String? = nil
+        var readFiles = true
     }
 
     let workDir: URL
@@ -92,17 +95,35 @@ final class ClaudeRunner {
         if let model = request.model, !model.isEmpty {
             args += ["--model", model]
         }
+        if let effort = request.effort, !effort.isEmpty {
+            args += ["--effort", effort]
+        }
         var prompt = request.prompt
 
         switch request.mode {
         case "agent":
-            let config: [String: Any] = ["mcpServers": ["canvas": [
+            var servers: [String: Any] = ["canvas": [
                 "type": "http",
                 "url": mcpURL,
                 "headers": ["Authorization": "Bearer \(token)"],
-            ]]]
-            let json = String(data: try JSONSerialization.data(withJSONObject: config), encoding: .utf8)!
-            args += ["--tools", "", "--mcp-config", json, "--strict-mcp-config", "--allowedTools", "mcp__canvas"]
+            ]]
+            if let chatId = request.chatId {
+                // read-only Claude Code tools; every permission goes to the app (AgentAccess)
+                servers["agent"] = [
+                    "type": "http",
+                    "url": mcpURL + "/agent",
+                    "headers": ["Authorization": "Bearer \(token)", "X-Canvas-Chat": chatId],
+                ]
+                let config = ["mcpServers": servers]
+                let json = String(data: try JSONSerialization.data(withJSONObject: config), encoding: .utf8)!
+                let allowed = AgentAccess.canvasToolNames.map { "mcp__canvas__\($0)" } + ["mcp__agent__ask_user", "WebSearch", "WebFetch"]
+                args += ["--tools", request.readFiles ? "Read,Glob,Grep,Bash,WebSearch,WebFetch" : "", "--mcp-config", json, "--strict-mcp-config",
+                         "--allowedTools", allowed.joined(separator: ","),
+                         "--permission-prompt-tool", "mcp__agent__approve"]
+            } else {
+                let json = String(data: try JSONSerialization.data(withJSONObject: ["mcpServers": servers]), encoding: .utf8)!
+                args += ["--tools", "", "--mcp-config", json, "--strict-mcp-config", "--allowedTools", "mcp__canvas"]
+            }
             if let session = request.sessionId, !session.isEmpty {
                 args += ["--resume", session]
             }
@@ -130,6 +151,8 @@ final class ClaudeRunner {
         env.removeValue(forKey: "ANTHROPIC_BASE_URL")
         env.removeValue(forKey: "ANTHROPIC_AUTH_TOKEN")
         env["CLAUDE_CODE_ENTRYPOINT"] = "canvas"
+        // permission cards and questions wait for the user
+        env["MCP_TOOL_TIMEOUT"] = "86400000"
         process.environment = env
 
         let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()

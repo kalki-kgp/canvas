@@ -74,9 +74,10 @@ final class Workspace: ObservableObject {
     let dataDir: URL
     let claude: ClaudeRunner
     weak var web: WebBridge?
-    private var chats: [String: ClaudeChat] = [:]
+    private var chats: [String: SceneChats] = [:]
+    /// scenes with a Claude run in progress, for the toolbar mark
+    @Published private(set) var claudeBusyScenes: Set<String> = []
     private var thumbs: [String: (Double, NSImage)] = [:]
-    private var editDebounce: DispatchWorkItem?
 
     init(dataDir: URL, claude: ClaudeRunner) {
         self.dataDir = dataDir
@@ -134,11 +135,30 @@ final class Workspace: ObservableObject {
         return image
     }
 
-    func chat(for sceneId: String) -> ClaudeChat {
-        if let chat = chats[sceneId] { return chat }
-        let chat = ClaudeChat(sceneId: sceneId, workspace: self)
-        chats[sceneId] = chat
-        return chat
+    func chats(for sceneId: String) -> SceneChats {
+        if let chats = chats[sceneId] { return chats }
+        let created = SceneChats(sceneId: sceneId, workspace: self)
+        chats[sceneId] = created
+        return created
+    }
+
+    /// scenes where a chat is waiting on the user
+    @Published private(set) var claudeNeedsYou: Set<String> = []
+
+    func claudeAttentionChanged(in sceneId: String, chat: ClaudeChat) {
+        let waiting = chats[sceneId]?.threads.contains { !$0.pending.isEmpty } ?? false
+        if waiting { claudeNeedsYou.insert(sceneId) } else { claudeNeedsYou.remove(sceneId) }
+        // bring the card into view
+        if !chat.pending.isEmpty, openSceneId == sceneId {
+            withAnimation(Chrome.panelSlide) {
+                if inspector != .claude { inspector = .claude; chats[sceneId]?.open(chat) }
+            }
+        }
+    }
+
+    func claudeRunChanged(in sceneId: String) {
+        let busy = chats[sceneId]?.threads.contains(where: \.running) ?? false
+        if busy { claudeBusyScenes.insert(sceneId) } else { claudeBusyScenes.remove(sceneId) }
     }
 
     // MARK: page → window
@@ -172,10 +192,8 @@ final class Workspace: ObservableObject {
             NSApp.appearance = appTheme == .system ? nil
                 : NSAppearance(named: editor == "dark" ? .darkAqua : .aqua)
         case "changed":
-            editDebounce?.cancel()
-            let work = DispatchWorkItem { [weak self] in self?.editTick += 1 }
-            editDebounce = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: work)
+            // the page sends this once an edit settles
+            editTick += 1
         default:
             break
         }

@@ -15,18 +15,30 @@ import {
 import { getDataURL } from "@excalidraw/excalidraw/data/blob";
 import { MERMAID_TO_EXCALIDRAW_CONFIG } from "@excalidraw/excalidraw/mermaid";
 
-import { navigate } from "../App";
-import { createScene, getIndex, getSceneMeta, renameScene } from "../data/store";
-import { getSession, waitForSession } from "../editor/session";
-import { getSlides, slideName } from "../editor/slides";
+import { duplicateElements } from "@excalidraw/element";
 
-import type { EditorSession } from "../editor/session";
+import type { LibraryItem } from "@excalidraw/excalidraw/types";
+
 import type { ExcalidrawElementSkeleton } from "@excalidraw/element/transform";
+
 import type {
   ExcalidrawElement,
   ExcalidrawTextElement,
   NonDeletedExcalidrawElement,
 } from "@excalidraw/element/types";
+
+import { navigate } from "../App";
+import { libraryAdapter } from "../data/importExport";
+import {
+  createScene,
+  getIndex,
+  getSceneMeta,
+  renameScene,
+} from "../data/store";
+import { getSession, waitForSession } from "../editor/session";
+import { getSlides, slideName } from "../editor/slides";
+
+import type { EditorSession } from "../editor/session";
 
 type Content =
   | { type: "text"; text: string }
@@ -39,10 +51,12 @@ type Tool = {
   run: (args: any) => Promise<Content[] | string | object>;
 };
 
-const obj = (
-  properties: Record<string, unknown>,
-  required: string[] = [],
-) => ({ type: "object", properties, required, additionalProperties: false });
+const obj = (properties: Record<string, unknown>, required: string[] = []) => ({
+  type: "object",
+  properties,
+  required,
+  additionalProperties: false,
+});
 
 const requireSession = (): EditorSession => {
   const session = getSession();
@@ -200,7 +214,12 @@ const routeArrows = (
     boxes.set(id, el);
   }
   for (const s of skeletons) {
-    if (s?.id && s.type !== "arrow" && s.type !== "line" && typeof s.x === "number") {
+    if (
+      s?.id &&
+      s.type !== "arrow" &&
+      s.type !== "line" &&
+      typeof s.x === "number"
+    ) {
       boxes.set(s.id, {
         x: s.x,
         y: s.y,
@@ -218,7 +237,10 @@ const routeArrows = (
     if (!from || !to) {
       continue;
     }
-    const centre = (b: Box) => ({ x: b.x + b.width / 2, y: b.y + b.height / 2 });
+    const centre = (b: Box) => ({
+      x: b.x + b.width / 2,
+      y: b.y + b.height / 2,
+    });
     const a = edgePoint(from, centre(to), 6);
     const b = edgePoint(to, centre(from), 6);
     s.x = a.x;
@@ -311,7 +333,9 @@ const screenshot = async (
   } else if (opts.ids?.length) {
     const ids = new Set(opts.ids);
     elements = all.filter(
-      (el) => ids.has(el.id) || (el.type === "text" && el.containerId && ids.has(el.containerId)),
+      (el) =>
+        ids.has(el.id) ||
+        (el.type === "text" && el.containerId && ids.has(el.containerId)),
     );
   }
   if (!elements.length) {
@@ -334,7 +358,9 @@ const screenshot = async (
     { type: "image", data: dataURL.split(",")[1], mimeType: "image/png" },
     {
       type: "text",
-      text: `Rendered ${elements.length} elements; scene bounds x ${round(minX)}..${round(maxX)}, y ${round(minY)}..${round(maxY)}.`,
+      text: `Rendered ${elements.length} elements; scene bounds x ${round(
+        minX,
+      )}..${round(maxX)}, y ${round(minY)}..${round(maxY)}.`,
     },
   ];
 };
@@ -510,7 +536,9 @@ const tools: Tool[] = [
   },
   {
     name: "update_elements",
-    description: `Change properties of existing elements: ${[...UPDATABLE].join(", ")}, and "text" for text elements or shape labels. Moving a shape moves its label too.`,
+    description: `Change properties of existing elements: ${[...UPDATABLE].join(
+      ", ",
+    )}, and "text" for text elements or shape labels. Moving a shape moves its label too.`,
     inputSchema: obj(
       {
         updates: {
@@ -562,7 +590,9 @@ const tools: Tool[] = [
         }
         if (typeof text === "string") {
           const target =
-            el.type === "text" ? (changed.get(id) as ExcalidrawTextElement) : label;
+            el.type === "text"
+              ? (changed.get(id) as ExcalidrawTextElement)
+              : label;
           if (target && target.type === "text") {
             changed.set(
               target.id,
@@ -588,22 +618,27 @@ const tools: Tool[] = [
   {
     name: "delete_elements",
     description: "Delete elements by id (their labels go with them).",
-    inputSchema: obj(
-      { ids: { type: "array", items: { type: "string" } } },
-      ["ids"],
-    ),
+    inputSchema: obj({ ids: { type: "array", items: { type: "string" } } }, [
+      "ids",
+    ]),
     async run({ ids }) {
       const session = requireSession();
       const doomed = new Set<string>(ids);
       const elements = session.api.getSceneElements();
       for (const el of elements) {
-        if (el.type === "text" && el.containerId && doomed.has(el.containerId)) {
+        if (
+          el.type === "text" &&
+          el.containerId &&
+          doomed.has(el.containerId)
+        ) {
           doomed.add(el.id);
         }
       }
       session.api.updateScene({
         elements: elements.map((el) =>
-          doomed.has(el.id) ? newElementWith(el, { isDeleted: true } as any) : el,
+          doomed.has(el.id)
+            ? newElementWith(el, { isDeleted: true } as any)
+            : el,
         ),
         captureUpdate: CaptureUpdateAction.IMMEDIATELY,
       });
@@ -612,7 +647,8 @@ const tools: Tool[] = [
   },
   {
     name: "clear_canvas",
-    description: "Remove everything from the open scene (undoable by the user).",
+    description:
+      "Remove everything from the open scene (undoable by the user).",
     inputSchema: obj({}),
     async run() {
       const session = requireSession();
@@ -655,7 +691,10 @@ const tools: Tool[] = [
         x ?? (existing.length ? getCommonBounds(existing)[2] + 120 : 0);
       const targetY = y ?? (existing.length ? getCommonBounds(existing)[1] : 0);
       converted = converted.map((el) =>
-        newElementWith(el, { x: el.x - minX + targetX, y: el.y - minY + targetY }),
+        newElementWith(el, {
+          x: el.x - minX + targetX,
+          y: el.y - minY + targetY,
+        }),
       );
       if (files) {
         session.api.addFiles(Object.values(files));
@@ -674,7 +713,10 @@ const tools: Tool[] = [
     inputSchema: obj({
       frameId: { type: "string" },
       ids: { type: "array", items: { type: "string" } },
-      maxSize: { type: "number", description: "longest side in px, default 1200" },
+      maxSize: {
+        type: "number",
+        description: "longest side in px, default 1200",
+      },
     }),
     async run(args) {
       return screenshot(requireSession(), args);
@@ -703,8 +745,7 @@ const tools: Tool[] = [
   },
   {
     name: "list_slides",
-    description:
-      "List the open scene's slides (frames) in presentation order.",
+    description: "List the open scene's slides (frames) in presentation order.",
     inputSchema: obj({}),
     async run() {
       const session = requireSession();
@@ -723,10 +764,9 @@ const tools: Tool[] = [
   {
     name: "set_slide_order",
     description: "Set the presentation order of slides (frame ids).",
-    inputSchema: obj(
-      { ids: { type: "array", items: { type: "string" } } },
-      ["ids"],
-    ),
+    inputSchema: obj({ ids: { type: "array", items: { type: "string" } } }, [
+      "ids",
+    ]),
     async run({ ids }) {
       const session = requireSession();
       session.setExtras({ slides: ids });
@@ -749,11 +789,136 @@ const tools: Tool[] = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// library: a text catalog (labels, size, shapes) instead of images
+// ---------------------------------------------------------------------------
+
+const loadLibrary = async () =>
+  ((await libraryAdapter.load({ source: "load" }))?.libraryItems ??
+    []) as LibraryItem[];
+
+/** the short texts inside an item, skipping filler paragraphs */
+const itemTexts = (item: LibraryItem) =>
+  (item.elements as readonly ExcalidrawElement[])
+    .filter(
+      (el): el is ExcalidrawTextElement => el.type === "text" && !el.isDeleted,
+    )
+    .map((el) => el.text.replace(/\s+/g, " ").trim())
+    .filter((t) => t && t.length <= 40 && !/lorem ipsum/i.test(t));
+
+const itemLabel = (item: LibraryItem) =>
+  item.name?.trim() || itemTexts(item).join(" / ") || "unlabeled";
+
+const libraryTools: Tool[] = [
+  {
+    name: "list_library",
+    description:
+      "List the user's library items (reusable drawings: icons, server/database shapes, UI parts) as text: id, label, size and the shapes inside. Optional query filters by label.",
+    inputSchema: obj({ query: { type: "string" } }),
+    async run({ query }) {
+      const items = await loadLibrary();
+      const q = typeof query === "string" ? query.trim().toLowerCase() : "";
+      const lines = items
+        .filter((item) => !q || itemLabel(item).toLowerCase().includes(q))
+        .map((item) => {
+          const live = item.elements.filter((el) => !el.isDeleted);
+          const [x1, y1, x2, y2] = getCommonBounds(live);
+          const counts = new Map<string, number>();
+          for (const el of live) {
+            counts.set(el.type, (counts.get(el.type) ?? 0) + 1);
+          }
+          const shapes = [...counts].map(([t, n]) => `${n} ${t}`).join(", ");
+          return `${item.id} | ${itemLabel(item)} | ${Math.round(
+            x2 - x1,
+          )}×${Math.round(y2 - y1)} | ${shapes}`;
+        });
+      if (!lines.length) {
+        return items.length
+          ? `No library items match “${query}”. ${items.length} items in all.`
+          : "The library is empty.";
+      }
+      return `id | label | size | shapes\n${lines.join("\n")}`;
+    },
+  },
+  {
+    name: "insert_library_item",
+    description:
+      'Place a library item on the canvas with its top-left at x,y, as one group. Optional scale (e.g. 0.5–2) and labels: a map from a text in the item to its replacement (e.g. {"Relational DB": "Postgres"}). Returns the new element ids; bind arrows to the returned shape ids.',
+    inputSchema: obj(
+      {
+        id: { type: "string" },
+        x: { type: "number" },
+        y: { type: "number" },
+        scale: { type: "number" },
+        labels: { type: "object", additionalProperties: { type: "string" } },
+      },
+      ["id", "x", "y"],
+    ),
+    async run({ id, x, y, scale, labels }) {
+      const session = requireSession();
+      const item = (await loadLibrary()).find((i) => i.id === id);
+      if (!item) {
+        throw new Error(`No library item “${id}”; call list_library for ids`);
+      }
+      const source = item.elements.filter((el) => !el.isDeleted);
+      const { duplicatedElements } = duplicateElements({
+        type: "everything",
+        elements: source,
+        randomizeSeed: true,
+      });
+      const [minX, minY] = getCommonBounds(duplicatedElements);
+      const k = typeof scale === "number" && scale > 0 ? scale : 1;
+      const groupId = Math.random().toString(36).slice(2, 12);
+      const needsGroup =
+        duplicatedElements.length > 1 &&
+        !duplicatedElements.every((el) => el.groupIds.length);
+      const replace = (labels ?? {}) as Record<string, string>;
+      const placed = duplicatedElements.map((el) => {
+        const patch: Record<string, unknown> = {
+          x: x + (el.x - minX) * k,
+          y: y + (el.y - minY) * k,
+          width: el.width * k,
+          height: el.height * k,
+        };
+        if (needsGroup) {
+          patch.groupIds = [...el.groupIds, groupId];
+        }
+        if ("points" in el) {
+          patch.points = el.points.map(([px, py]) => [px * k, py * k]);
+        }
+        if (el.type === "text") {
+          patch.fontSize = el.fontSize * k;
+          const key = el.text.replace(/\s+/g, " ").trim();
+          const next = replace[el.text] ?? replace[key];
+          if (typeof next === "string") {
+            patch.text = next;
+            patch.originalText = next;
+          }
+        }
+        return newElementWith(el, patch as any);
+      });
+      addToScene(session, placed);
+      return {
+        placed: placed
+          .filter((el) => !(el.type === "text" && el.containerId))
+          .map((el) => ({
+            id: el.id,
+            type: el.type,
+            ...(el.type === "text" ? { text: el.text } : {}),
+          })),
+      };
+    },
+  },
+];
+
+tools.push(...libraryTools);
+
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 const INSTRUCTIONS = `Canvas is the user's Excalidraw app on this Mac. Tools act on the scene open in the app, live, while the user watches.
 Workflow: get_scene first (to see what's there and find free space), then add_elements / add_mermaid, then screenshot to check the result and fix overlaps or cramped text.
 Layout tips: leave 40–80px between shapes; size boxes to fit labels (~10px per character at fontSize 20, min 140×60); align things on a grid; use color sparingly for grouping.
+The user's library (list_library / insert_library_item) holds reusable drawings such as server, database and cloud shapes; it is listed as text, so it's cheap to check.
 For presentations, make one frame per slide (e.g. 1280×720, side by side with 100px gaps) and put each slide's content inside it.`;
 
 type RpcRequest = {
@@ -822,7 +987,9 @@ const handleOne = async (req: RpcRequest) => {
         return reply({ content: toContent(result) });
       } catch (error: any) {
         return reply({
-          content: [{ type: "text", text: `Error: ${error?.message || error}` }],
+          content: [
+            { type: "text", text: `Error: ${error?.message || error}` },
+          ],
           isError: true,
         });
       }

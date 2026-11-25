@@ -31,13 +31,14 @@ final class Routes {
             return res.text(403, "Forbidden host")
         }
 
-        if req.path == "/mcp" || req.path.hasPrefix("/api/") {
+        if req.path == "/mcp" || req.path == "/mcp/agent" || req.path.hasPrefix("/api/") {
             // browsers on other sites can't call in
             if let o = req.header("origin"), o != origin, o != "http://localhost:\(port)" {
                 return res.text(403, "Forbidden origin")
             }
             guard authorized(req) else { return res.text(401, "Missing or wrong token") }
             if req.path == "/mcp" { return mcp(req, res) }
+            if req.path == "/mcp/agent" { return AgentMCP.handle(req, res) }
             return api(req, res, path: String(req.path.dropFirst("/api/".count)))
         }
 

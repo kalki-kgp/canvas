@@ -63,6 +63,7 @@ import type {
 
 const SAVE_DEBOUNCE_MS = 400;
 const THUMB_DEBOUNCE_MS = 2500;
+const CHANGED_DEBOUNCE_MS = 800;
 const SNAPSHOT_EVERY_MS = 5 * 60 * 1000;
 
 /** asks the window to show one of its side panels */
@@ -131,6 +132,7 @@ export const Editor = ({
   const dirtySinceSnapshotRef = useRef(false);
   const saveTimerRef = useRef<number | undefined>(undefined);
   const thumbTimerRef = useRef<number | undefined>(undefined);
+  const changedTimerRef = useRef<number | undefined>(undefined);
   const pendingRef = useRef<{
     elements: readonly ExcalidrawElement[];
     appState: AppState;
@@ -287,7 +289,12 @@ export const Editor = ({
         lastKeyRef.current = key;
         pendingRef.current = { elements, appState, files };
         scheduleSave();
-        postNative("changed", { sceneId });
+        // tell the native side once the edit settles, not on every drag frame
+        window.clearTimeout(changedTimerRef.current);
+        changedTimerRef.current = window.setTimeout(
+          () => postNative("changed", { sceneId }),
+          CHANGED_DEBOUNCE_MS,
+        );
       }
       // the export dialog lets you rename the scene
       const current = getSceneMeta(sceneId);
