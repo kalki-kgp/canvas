@@ -2,19 +2,19 @@
 
 ## Project Structure
 
-Excalidraw is a **monorepo** with a clear separation between the core library and the application:
+Canvas is Excalidraw as a native Mac app. It's a Yarn workspaces monorepo:
 
-- **`packages/excalidraw/`** - Main React component library published to npm as `@excalidraw/excalidraw`
-- **`excalidraw-app/`** - Full-featured web application (excalidraw.com) that uses the library
-- **`packages/`** - Core packages: `@excalidraw/common`, `@excalidraw/element`, `@excalidraw/math`, `@excalidraw/utils`
-- **`examples/`** - Integration examples (NextJS, browser script)
+- **`canvas-app/`** - Web layer loaded by the Mac app: editor, store (via the native HTTP server), MCP tools, sharing (`collab/`), bridge
+- **`macos/`** - Swift/SwiftUI app: window, panels, local HTTP server, Claude runner, `build.sh`
+- **`relay/`** - Cloudflare Worker for shared scenes (separate npm project, not a workspace)
+- **`packages/`** - Excalidraw packages: `@excalidraw/excalidraw`, `common`, `element`, `math`, `utils`, …; keep changes small so upstream merges stay easy
 
 ## Development Workflow
 
-1. **Package Development**: Work in `packages/*` for editor features
-2. **App Development**: Work in `excalidraw-app/` for app-specific features
-3. **Testing**: Always run `yarn test:update` before committing
-4. **Type Safety**: Use `yarn test:typecheck` to verify TypeScript
+1. **Editor features**: `packages/*`; **app features**: `canvas-app/` and `macos/`
+2. **Testing**: Always run `yarn test:update` before committing
+3. **Type Safety**: `yarn test:typecheck` (packages and canvas-app)
+4. **Build and install**: `yarn app:install`
 
 ## Development Commands
 
@@ -22,13 +22,11 @@ Excalidraw is a **monorepo** with a clear separation between the core library an
 yarn test:typecheck  # TypeScript type checking
 yarn test:update     # Run all tests (with snapshot updates)
 yarn fix             # Auto-fix formatting and linting issues
+yarn app:install     # Build Canvas.app and install it to /Applications
 ```
 
 ## Architecture Notes
 
-### Package System
-
-- Uses Yarn workspaces for monorepo management
-- Internal packages use path aliases (see `vitest.config.mts`)
-- Build system uses esbuild for packages, Vite for the app
+- `canvas-app` resolves `@excalidraw/*` straight to `packages/*` sources (see `canvas-app/vite.config.mts`); the packages aren't built separately
+- Tests run with Vitest; internal packages use path aliases (see `vitest.config.mts`)
 - TypeScript throughout with strict configuration
