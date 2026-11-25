@@ -1,0 +1,6 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "types": ["vite/client"] },
+  "include": [".", "../packages/excalidraw/global.d.ts", "../packages/excalidraw/css.d.ts"],
+  "exclude": ["build", "node_modules"]
+}
