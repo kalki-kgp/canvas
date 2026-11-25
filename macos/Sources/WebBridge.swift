@@ -150,6 +150,16 @@ final class WebBridge: NSObject, WKNavigationDelegate, WKUIDelegate,
             return decisionHandler(.allow)
         }
         let mainFrame = action.targetFrame?.isMainFrame ?? true
+        if mainFrame, let url, Self.isLibrariesSite(url) {
+            // the libraries site stays inside Canvas
+            if let open = popups.first, let popup = open.contentView as? WKWebView {
+                popup.load(action.request)
+                open.makeKeyAndOrderFront(nil)
+            } else {
+                makeLibrariesWindow().load(action.request)
+            }
+            return decisionHandler(.cancel)
+        }
         if mainFrame, let url, !isApp(url), url.scheme != "about", url.scheme != "blob", url.scheme != "data" {
             // links out of the app open in the default browser
             NSWorkspace.shared.open(url)
@@ -255,25 +265,55 @@ final class WebBridge: NSObject, WKNavigationDelegate, WKUIDelegate,
         // the libraries site's "Add to Excalidraw" opens the app's
         // `#addLibrary=` link in a new window: install it here instead
         if handlePopupNavigation(webView, url: url) { return nil }
-        if url.host?.hasSuffix("libraries.excalidraw.com") == true {
-            let popup = WKWebView(frame: .zero, configuration: configuration)
-            popup.navigationDelegate = self
-            popup.uiDelegate = self
-            let win = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 1100, height: 780),
-                styleMask: [.titled, .closable, .resizable, .miniaturizable],
-                backing: .buffered, defer: false
-            )
-            win.title = "Excalidraw Libraries"
-            win.contentView = popup
-            win.isReleasedWhenClosed = false
-            win.center()
-            win.makeKeyAndOrderFront(nil)
-            popups.append(win)
-            return popup
+        if Self.isLibrariesSite(url) {
+            if let open = popups.first, let popup = open.contentView as? WKWebView {
+                popup.load(action.request)
+                open.makeKeyAndOrderFront(nil)
+                return nil
+            }
+            return makeLibrariesWindow(configuration)
         }
         NSWorkspace.shared.open(url)
         return nil
+    }
+
+    static func isLibrariesSite(_ url: URL) -> Bool {
+        url.host?.hasSuffix("libraries.excalidraw.com") == true
+    }
+
+    /// The in-app window the libraries site lives in.
+    @discardableResult
+    func makeLibrariesWindow(_ configuration: WKWebViewConfiguration? = nil) -> WKWebView {
+        let popup = WKWebView(frame: .zero, configuration: configuration ?? {
+            let config = WKWebViewConfiguration()
+            config.websiteDataStore = webView.configuration.websiteDataStore
+            config.processPool = webView.configuration.processPool
+            return config
+        }())
+        popup.navigationDelegate = self
+        popup.uiDelegate = self
+        let win = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 780),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered, defer: false
+        )
+        win.title = "Excalidraw Libraries"
+        win.contentView = popup
+        win.isReleasedWhenClosed = false
+        win.center()
+        // a closed window must not stay around as the link's named target
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: win, queue: .main) {
+            [weak self] note in
+            MainActor.assumeIsolated {
+                guard let win = note.object as? NSWindow else { return }
+                (win.contentView as? WKWebView)?.stopLoading()
+                win.contentView = nil
+                self?.popups.removeAll { $0 === win }
+            }
+        }
+        win.makeKeyAndOrderFront(nil)
+        popups.append(win)
+        return popup
     }
 
     func webViewDidClose(_ webView: WKWebView) {
