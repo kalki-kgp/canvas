@@ -128,7 +128,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowWillEnterFullScreen(_ notification: Notification) {
         // the empty toolbar that rounds the windowed corners would show as a blank strip
         window?.toolbar = nil
+        if let window { unpinTrafficLights(on: window) }
         workspace?.isFullScreen = true
+    }
+
+    /// The full-screen title bar lays out its own buttons; the windowed
+    /// placement constraints would push them out of it.
+    private func unpinTrafficLights(on window: NSWindow) {
+        for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            guard let button = window.standardWindowButton(type), !button.translatesAutoresizingMaskIntoConstraints else { continue }
+            if let superview = button.superview {
+                superview.removeConstraints(superview.constraints.filter { $0.firstItem === button || $0.secondItem === button })
+            }
+            button.removeConstraints(button.constraints.filter { $0.firstItem === button && $0.secondItem == nil })
+            button.translatesAutoresizingMaskIntoConstraints = true
+        }
+        window.standardWindowButton(.closeButton)?.superview?.needsLayout = true
     }
 
     func windowDidExitFullScreen(_ notification: Notification) {
