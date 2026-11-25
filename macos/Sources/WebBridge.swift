@@ -252,6 +252,9 @@ final class WebBridge: NSObject, WKNavigationDelegate, WKUIDelegate,
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let url = action.request.url else { return nil }
+        // the libraries site's "Add to Excalidraw" opens the app's
+        // `#addLibrary=` link in a new window: install it here instead
+        if handlePopupNavigation(webView, url: url) { return nil }
         if url.host?.hasSuffix("libraries.excalidraw.com") == true {
             let popup = WKWebView(frame: .zero, configuration: configuration)
             popup.navigationDelegate = self
