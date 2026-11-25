@@ -24,7 +24,7 @@ final class WebBridge: NSObject, WKNavigationDelegate, WKUIDelegate,
 
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
-        let boot = "window.__CANVAS__ = {token: \(Self.jsString(token)), port: \(port), version: \(Self.jsString(version))};"
+        let boot = "window.__CANVAS__ = {token: \(Self.jsString(token)), port: \(port), version: \(Self.jsString(version)), userName: \(Self.jsString(NSFullUserName()))};"
         config.userContentController.addUserScript(
             WKUserScript(source: boot, injectionTime: .atDocumentStart, forMainFrameOnly: true)
         )

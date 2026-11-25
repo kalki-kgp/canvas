@@ -29,6 +29,17 @@ import {
   toggleStar,
 } from "./data/store";
 import { getSession } from "./editor/session";
+import { activeCollab } from "./collab/useCollab";
+import {
+  createLink,
+  listLinks,
+  loadShare,
+  parseLink,
+  revokeLink,
+  saveShare,
+  startSharing,
+  stopSharing,
+} from "./collab/shares";
 import { getSlides, renderSlideDataURL, slideName } from "./editor/slides";
 
 import type { Theme } from "@excalidraw/element/types";
@@ -174,6 +185,74 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
     await s.restore(doc);
   },
   saveVersion: (label?: string) => session().saveVersion(label || undefined),
+
+  // sharing -------------------------------------------------------------------
+
+  /** everything the Share popover shows for the open scene */
+  async shareStatus() {
+    const s = session();
+    const info = await loadShare(s.sceneId);
+    if (!info) {
+      return { shared: false };
+    }
+    const live = activeCollab();
+    const status = live?.sceneId === s.sceneId ? live.status : null;
+    return {
+      shared: true,
+      role: status?.role ?? info.role,
+      state: status?.state ?? "connecting",
+      peers: status?.peers ?? 0,
+      ended: info.ended ?? null,
+      links: info.role === "owner" ? await listLinks(s.sceneId) : [],
+    };
+  },
+  async shareStart() {
+    const s = session();
+    await s.flush();
+    await startSharing(s.sceneId);
+    // the first link: people you share with can draw too
+    const link = await createLink(s.sceneId, "edit");
+    return link.id;
+  },
+  async shareNewLink(mode: "view" | "edit") {
+    return (await createLink(session().sceneId, mode)).id;
+  },
+  shareRevoke: (linkId: string) => revokeLink(session().sceneId, linkId),
+  shareStop: () => stopSharing(session().sceneId),
+  /** guest: keep the copy here, stop syncing */
+  shareLeave: () => saveShare(session().sceneId, null),
+
+  /** opens a share link: an existing copy, or a new scene that fills in */
+  async joinShared(url: string) {
+    const link = parseLink(url);
+    if (!link) {
+      throw new Error("That doesn't look like a Canvas share link.");
+    }
+    for (const scene of getIndex().scenes) {
+      const info = await loadShare(scene.id);
+      if (info?.roomId === link.roomId) {
+        if (info.role !== "owner") {
+          await saveShare(scene.id, {
+            ...info,
+            key: link.key,
+            token: link.token,
+            ended: undefined,
+          });
+        }
+        navigate({ view: "scene", id: scene.id });
+        return scene.id;
+      }
+    }
+    const meta = await createScene({ name: "Shared scene" });
+    await saveShare(meta.id, {
+      roomId: link.roomId,
+      key: link.key,
+      token: link.token,
+      role: "view",
+    });
+    navigate({ view: "scene", id: meta.id });
+    return meta.id;
+  },
 };
 
 export const installBridge = () => {

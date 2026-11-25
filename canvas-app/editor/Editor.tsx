@@ -47,6 +47,8 @@ import {
 } from "../data/store";
 import { onNativeEvent, postNative } from "../data/native";
 
+import { useCollab } from "../collab/useCollab";
+
 import { AIComponents } from "./AI";
 import { Presenter } from "./Presenter";
 import { setSession } from "./session";
@@ -139,6 +141,8 @@ export const Editor = ({
     files: BinaryFiles;
   } | null>(null);
   const savingRef = useRef<Promise<void>>(Promise.resolve());
+  const collab = useCollab(sceneId, api);
+  const editorNameRef = useRef<string | null>(null);
 
   // load ----------------------------------------------------------------------
 
@@ -289,6 +293,7 @@ export const Editor = ({
         lastKeyRef.current = key;
         pendingRef.current = { elements, appState, files };
         scheduleSave();
+        collab.localChanged();
         // tell the native side once the edit settles, not on every drag frame
         window.clearTimeout(changedTimerRef.current);
         changedTimerRef.current = window.setTimeout(
@@ -296,13 +301,23 @@ export const Editor = ({
           CHANGED_DEBOUNCE_MS,
         );
       }
-      // the export dialog lets you rename the scene
+      // the export dialog lets you rename the scene: follow the editor's
+      // name only when it changes there, or a rename made elsewhere and the
+      // editor's not-yet-updated name would rename each other back and forth
       const current = getSceneMeta(sceneId);
-      if (appState.name && current && appState.name !== current.name) {
+      const previous = editorNameRef.current;
+      editorNameRef.current = appState.name;
+      if (
+        appState.name &&
+        current &&
+        previous !== null &&
+        appState.name !== previous &&
+        appState.name !== current.name
+      ) {
         renameScene(sceneId, appState.name);
       }
     },
-    [initialData, scheduleSave, sceneId],
+    [initialData, scheduleSave, sceneId, collab.localChanged],
   );
 
   // keep the scene name in the editor in sync with renames elsewhere
@@ -500,6 +515,9 @@ export const Editor = ({
         onExcalidrawAPI={setApi}
         initialData={initialData}
         onChange={onChange}
+        isCollaborating={collab.isCollaborating}
+        onPointerUpdate={collab.isCollaborating ? collab.pointer : undefined}
+        viewModeEnabled={collab.viewOnly || undefined}
         theme={settings.editorTheme}
         onThemeChange={settings.setAppTheme}
         langCode={settings.langCode}

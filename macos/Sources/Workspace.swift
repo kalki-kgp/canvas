@@ -69,6 +69,8 @@ final class Workspace: ObservableObject {
     @Published private(set) var appTheme: AppTheme = .system
     /// bumps (debounced) when the open scene's elements change
     @Published private(set) var editTick = 0
+    /// shared scenes' live state, from the page ("live", "offline", …)
+    @Published private(set) var collab: [String: CollabInfo] = [:]
     @Published var renamingCollection: String?
 
     let dataDir: URL
@@ -194,6 +196,15 @@ final class Workspace: ObservableObject {
         case "changed":
             // the page sends this once an edit settles
             editTick += 1
+        case "collab":
+            guard let sceneId = message["sceneId"] as? String else { return }
+            let state = message["state"] as? String ?? "off"
+            withAnimation(Chrome.hover) {
+                collab[sceneId] = state == "off" ? nil : CollabInfo(
+                    state: state,
+                    role: message["role"] as? String ?? "view",
+                    peers: message["peers"] as? Int ?? 0)
+            }
         default:
             break
         }
@@ -317,7 +328,34 @@ extension Workspace {
         }
     }
 
+    /// Asks for a share link (filled in from the clipboard when it holds one) and opens it.
+    func openSharedLink() {
+        let clip = NSPasteboard.general.string(forType: .string) ?? ""
+        let initial = clip.contains("canvas.paperknife.app/s/") ? clip.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        let alert = NSAlert()
+        alert.messageText = "Open Shared Link"
+        alert.informativeText = "Paste a Canvas share link. The scene opens here and stays in sync."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        field.placeholderString = "https://canvas.paperknife.app/s/…"
+        field.stringValue = initial
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Open")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard let window = web?.webView.window else { return }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            let link = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if response == .alertFirstButtonReturn, !link.isEmpty { self?.run("joinShared", link) }
+        }
+    }
+
     func rename(_ scene: SceneMeta) {
         askName("Rename Scene", initial: scene.name) { [weak self] in self?.run("rename", scene.id, $0) }
     }
+}
+
+struct CollabInfo: Equatable {
+    var state: String
+    var role: String
+    var peers: Int
 }

@@ -68,6 +68,7 @@ private struct EditorBar: View {
                 .onTapGesture(count: 2) { if let scene = ws.openScene { ws.rename(scene) } }
                 .help("Double-click to rename")
             Spacer(minLength: 12)
+            ShareButton(ws: ws)
             ChromeTextButton(symbol: "play.fill", title: "Present", help: "Present frames as slides (⌥⌘P)") {
                 ws.run("present", 0)
             }

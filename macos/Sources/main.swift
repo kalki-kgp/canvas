@@ -202,6 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func saveVersion(_ sender: Any?) { web?.menu("save-version") }
     @objc func reloadPage(_ sender: Any?) { web?.webView.reload() }
     @objc func importFiles(_ sender: Any?) { workspace?.importFiles() }
+    @objc func openSharedLink(_ sender: Any?) { workspace?.openSharedLink() }
 
     @objc func connectClaudeCode(_ sender: Any?) {
         let command = "claude mcp add --scope user --transport http canvas http://127.0.0.1:\(PORT)/mcp --header \"Authorization: Bearer \(token)\""
@@ -267,6 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             item("All Scenes", #selector(showDashboard(_:)), "h", [.command, .shift], target: self),
             .separator(),
             item("Import…", #selector(importFiles(_:)), target: self),
+            item("Open Shared Link…", #selector(openSharedLink(_:)), "o", [.command, .shift], target: self),
             item("Save Version", #selector(saveVersion(_:)), target: self),
             .separator(),
             item("Close Window", #selector(NSWindow.performClose(_:)), "w"),
