@@ -28,6 +28,15 @@ import {
 import { useI18n } from "@excalidraw/excalidraw/i18n";
 import { isElementLink } from "@excalidraw/element";
 
+import type { ExcalidrawElement } from "@excalidraw/element/types";
+
+import type {
+  AppState,
+  BinaryFiles,
+  ExcalidrawImperativeAPI,
+  ExcalidrawInitialDataState,
+} from "@excalidraw/excalidraw/types";
+
 import { navigate } from "../App";
 import { libraryAdapter } from "../data/importExport";
 import {
@@ -45,7 +54,8 @@ import {
   updateSceneMeta,
   useIndex,
 } from "../data/store";
-import { onNativeEvent, postNative } from "../data/native";
+import { isNative, onNativeEvent, postNative } from "../data/native";
+import { WebShare } from "../web/WebShare";
 
 import { useCollab } from "../collab/useCollab";
 
@@ -55,13 +65,6 @@ import { setSession } from "./session";
 
 import type { AppSettings } from "../App";
 import type { CanvasSceneExtras, SceneDoc } from "../data/store";
-import type { ExcalidrawElement } from "@excalidraw/element/types";
-import type {
-  AppState,
-  BinaryFiles,
-  ExcalidrawImperativeAPI,
-  ExcalidrawInitialDataState,
-} from "@excalidraw/excalidraw/types";
 
 const SAVE_DEBOUNCE_MS = 400;
 const THUMB_DEBOUNCE_MS = 2500;
@@ -77,8 +80,9 @@ const buildDoc = (
   appState: AppState,
   extras: CanvasSceneExtras,
 ): SceneDoc => {
-  const { theme, name, openSidebar, ...rest } =
-    clearAppStateForLocalStorage(appState) as Partial<AppState>;
+  const { theme, name, openSidebar, ...rest } = clearAppStateForLocalStorage(
+    appState,
+  ) as Partial<AppState>;
   return {
     type: "excalidraw",
     version: 2,
@@ -113,6 +117,31 @@ const LanguageList = ({
     </select>
   );
 };
+
+/** command palette items for the Mac app's side panels */
+const nativeCommands = [
+  {
+    label: "Slides",
+    category: DEFAULT_CATEGORIES.app,
+    icon: presentationIcon,
+    keywords: ["presentation", "frames", "order", "pdf"],
+    perform: () => openPanel("slides"),
+  },
+  {
+    label: "Version history",
+    category: DEFAULT_CATEGORIES.app,
+    icon: historyIcon,
+    keywords: ["versions", "snapshots", "restore", "revert"],
+    perform: () => openPanel("history"),
+  },
+  {
+    label: "Ask Claude",
+    category: DEFAULT_CATEGORIES.app,
+    icon: brainIcon,
+    keywords: ["ai", "agent", "claude", "generate"],
+    perform: () => openPanel("claude"),
+  },
+];
 
 export const Editor = ({
   sceneId,
@@ -233,7 +262,11 @@ export const Editor = ({
         }
         return;
       }
-      const doc = buildDoc(pending.elements, pending.appState, extrasRef.current);
+      const doc = buildDoc(
+        pending.elements,
+        pending.appState,
+        extrasRef.current,
+      );
       await saveFiles(pending.files);
       await saveSceneDoc(sceneId, doc);
       dirtySinceSnapshotRef.current = true;
@@ -359,7 +392,11 @@ export const Editor = ({
       savingRef.current = savingRef.current.then(async () => {
         const pending = pendingRef.current!;
         pendingRef.current = null;
-        const doc = buildDoc(pending.elements, pending.appState, extrasRef.current);
+        const doc = buildDoc(
+          pending.elements,
+          pending.appState,
+          extrasRef.current,
+        );
         await saveFiles(pending.files);
         await saveSceneDoc(sceneId, doc);
         await saveSnapshot(sceneId, doc, label);
@@ -417,7 +454,15 @@ export const Editor = ({
       stopPresenting: () => setPresenting(null),
     });
     return () => setSession(null);
-  }, [api, sceneId, flush, scheduleSave, startPresenting, saveVersion, restore]);
+  }, [
+    api,
+    sceneId,
+    flush,
+    scheduleSave,
+    startPresenting,
+    saveVersion,
+    restore,
+  ]);
 
   useHandleLibrary({ excalidrawAPI: api, adapter: libraryAdapter });
 
@@ -469,27 +514,7 @@ export const Editor = ({
         keywords: ["slides", "presentation", "frames", "slideshow"],
         perform: () => startPresenting(0),
       },
-      {
-        label: "Slides",
-        category: DEFAULT_CATEGORIES.app,
-        icon: presentationIcon,
-        keywords: ["presentation", "frames", "order", "pdf"],
-        perform: () => openPanel("slides"),
-      },
-      {
-        label: "Version history",
-        category: DEFAULT_CATEGORIES.app,
-        icon: historyIcon,
-        keywords: ["versions", "snapshots", "restore", "revert"],
-        perform: () => openPanel("history"),
-      },
-      {
-        label: "Ask Claude",
-        category: DEFAULT_CATEGORIES.app,
-        icon: brainIcon,
-        keywords: ["ai", "agent", "claude", "generate"],
-        perform: () => openPanel("claude"),
-      },
+      ...(isNative ? nativeCommands : []),
     ],
     [newScene, startPresenting],
   );
@@ -518,6 +543,11 @@ export const Editor = ({
         isCollaborating={collab.isCollaborating}
         onPointerUpdate={collab.isCollaborating ? collab.pointer : undefined}
         viewModeEnabled={collab.viewOnly || undefined}
+        renderTopRightUI={
+          isNative
+            ? undefined
+            : () => <WebShare sceneId={sceneId} status={collab.status} />
+        }
         theme={settings.editorTheme}
         onThemeChange={settings.setAppTheme}
         langCode={settings.langCode}
@@ -537,6 +567,14 @@ export const Editor = ({
         }}
       >
         <MainMenu>
+          {!isNative && (
+            <MainMenu.Item
+              icon={chevronLeftIcon}
+              onSelect={() => navigate({ view: "dashboard" })}
+            >
+              All scenes
+            </MainMenu.Item>
+          )}
           <MainMenu.DefaultItems.LoadScene />
           <MainMenu.DefaultItems.SaveToActiveFile />
           <MainMenu.DefaultItems.Export />
@@ -570,12 +608,14 @@ export const Editor = ({
             </WelcomeScreen.Center.Heading>
             <WelcomeScreen.Center.Menu>
               <WelcomeScreen.Center.MenuItemLoadScene />
-              <WelcomeScreen.Center.MenuItem
-                icon={brainIcon}
-                onSelect={() => openPanel("claude")}
-              >
-                Ask Claude to draw
-              </WelcomeScreen.Center.MenuItem>
+              {isNative && (
+                <WelcomeScreen.Center.MenuItem
+                  icon={brainIcon}
+                  onSelect={() => openPanel("claude")}
+                >
+                  Ask Claude to draw
+                </WelcomeScreen.Center.MenuItem>
+              )}
               <WelcomeScreen.Center.MenuItemHelp />
             </WelcomeScreen.Center.Menu>
           </WelcomeScreen.Center>
@@ -586,8 +626,9 @@ export const Editor = ({
           <OverwriteConfirmDialog.Actions.SaveToDisk />
         </OverwriteConfirmDialog>
 
-        {api && <AIComponents excalidrawAPI={api} />}
-        <TTDDialogTrigger />
+        {/* Claude runs through the Mac app */}
+        {isNative && api && <AIComponents excalidrawAPI={api} />}
+        {isNative && <TTDDialogTrigger />}
 
         <CommandPalette customCommandPaletteItems={commandItems} />
       </Excalidraw>

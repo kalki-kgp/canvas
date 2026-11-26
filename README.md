@@ -12,6 +12,10 @@ Excalidraw as a native Mac app: free, local-first, with live sharing and Claude 
 
 Everything from the open-source editor comes along: frames, sticky notes, Mermaid, libraries, embeds, the laser pointer, the command palette, search and all the export options.
 
+## On the web
+
+[canvas.paperknife.app](https://canvas.paperknife.app) is the same editor in any browser, for people without the Mac app: open a share link there (you'll be asked for a name for your cursor), or start scenes of your own. Scenes on the web are saved in that browser, and sharing works the same way as on the Mac. Claude, slides and version history are Mac-only.
+
 ## Install
 
 Download the DMG from [Releases](https://github.com/kalki-kgp/canvas/releases), open it and drag Canvas to Applications. The app isn't notarized, so the first time, right-click Canvas → Open, or run:
@@ -25,10 +29,10 @@ Needs macOS 26 on Apple silicon. The Claude features need [Claude Code](https://
 ## Sharing
 
 1. Open a scene and click **Share → Start Sharing**. The first link can edit; add a **View Only** link from the same popover.
-2. Copy a link and send it. The other person opens it with **File → Open Shared Link…** (⇧⌘O).
+2. Copy a link and send it. It opens in any browser at canvas.paperknife.app; in the Mac app, use **File → Open Shared Link…** (⇧⌘O).
 3. The toolbar shows **Shared · N** while people are in. Turn a link off with ✕, or **Stop Sharing** to delete the shared copy; everyone keeps the copy they have.
 
-How it works: each copy of a shared scene is complete, and edits merge per element (the newer version of a shape wins, deletions included), so offline work merges when you reconnect. A small relay at `canvas.paperknife.app` passes edits between people and keeps the latest encrypted copy for whoever opens the scene next. It runs on Cloudflare's free plan. Images in shared scenes don't sync yet.
+How it works: each copy of a shared scene is complete, and edits merge per element (the newer version of a shape wins, deletions included), so offline work merges when you reconnect. A small Cloudflare Worker at `canvas.paperknife.app` serves the website and passes edits between people and keeps the latest encrypted copy for whoever opens the scene next. It runs on Cloudflare's free plan. Images in shared scenes don't sync yet.
 
 ## Build
 
@@ -45,15 +49,15 @@ You need macOS 26, Node 18+ and the Xcode command line tools.
 | `yarn test:update` | Run the tests (run before every commit) |
 | `yarn test:typecheck` | Typecheck the packages and `canvas-app` |
 | `cd relay && npm test` | Run the relay's end-to-end test against a local `wrangler dev` |
-| `cd relay && npm run deploy` | Deploy the relay to Cloudflare |
+| `cd canvas-app && npx vite build && cd ../relay && npm run deploy` | Build the website and deploy it with the relay |
 
 ## Layout
 
 | Path | What |
 | --- | --- |
-| `canvas-app/` | Web layer: the editor, its store, presenter, AI dialogs, MCP tools, sharing (`collab/`) and the bridge the window calls |
+| `canvas-app/` | The editor for both the Mac app and the website: store (native or IndexedDB), presenter, AI dialogs, MCP tools, sharing (`collab/`), web pages (`web/`) and the bridge the window calls |
 | `macos/` | Swift app: the window (library, toolbar, Share popover, Slides / History / Claude panels), local HTTP server, Claude runner and its permission checks, build script |
-| `relay/` | Cloudflare Worker + Durable Object that relays and stores encrypted shared scenes |
+| `relay/` | Cloudflare Worker that serves the website (`canvas-app`'s build) and relays and stores encrypted shared scenes in a Durable Object |
 | `packages/` | The Excalidraw editor packages, kept close to upstream so merges stay easy |
 
 ## Credits

@@ -49,7 +49,8 @@ const check = async (res: Response) => {
   return res;
 };
 
-export const blobs = {
+/** the Mac app's store, over its local HTTP server */
+const nativeBlobs = {
   async getJSON<T>(path: string): Promise<T | null> {
     const res = await api(`blob/${path}`);
     if (res.status === 404) {
@@ -95,7 +96,92 @@ export const blobs = {
   },
 };
 
-export const postNative = (type: string, payload: Record<string, unknown> = {}) => {
+// In a plain browser (canvas.paperknife.app) there is no native store:
+// the same paths live in IndexedDB instead.
+
+type Stored = { data: unknown; size: number; mtime: number };
+
+let dbPromise: Promise<IDBDatabase> | null = null;
+const db = () =>
+  (dbPromise ??= new Promise<IDBDatabase>((resolve, reject) => {
+    const req = indexedDB.open("canvas", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("blobs");
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  }));
+
+const tx = async <T>(
+  mode: IDBTransactionMode,
+  run: (store: IDBObjectStore) => IDBRequest<T>,
+) => {
+  const store = (await db()).transaction("blobs", mode).objectStore("blobs");
+  return new Promise<T>((resolve, reject) => {
+    const req = run(store);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+};
+
+const browserBlobs: typeof nativeBlobs & {
+  getBlob(path: string): Promise<Blob | null>;
+} = {
+  async getJSON<T>(path: string): Promise<T | null> {
+    const row = await tx<Stored | undefined>("readonly", (s) => s.get(path));
+    return row ? (row.data as T) : null;
+  },
+  async putJSON(path: string, data: unknown) {
+    // stored as a structured clone; size is only for listings
+    const size = JSON.stringify(data)?.length ?? 0;
+    await tx("readwrite", (s) =>
+      s.put(
+        { data: JSON.parse(JSON.stringify(data)), size, mtime: Date.now() },
+        path,
+      ),
+    );
+  },
+  async putBlob(path: string, data: Blob) {
+    await tx("readwrite", (s) =>
+      s.put({ data, size: data.size, mtime: Date.now() }, path),
+    );
+  },
+  async getBlob(path: string) {
+    const row = await tx<Stored | undefined>("readonly", (s) => s.get(path));
+    return row?.data instanceof Blob ? row.data : null;
+  },
+  async delete(path: string) {
+    await tx("readwrite", (s) => s.delete(path));
+  },
+  async list(dir: string) {
+    const prefix = `${dir.replace(/\/$/, "")}/`;
+    const range = IDBKeyRange.bound(prefix, `${prefix}\uffff`);
+    const keys = await tx<IDBValidKey[]>("readonly", (s) =>
+      s.getAllKeys(range),
+    );
+    const rows = await tx<Stored[]>("readonly", (s) => s.getAll(range));
+    return keys
+      .map((key, i) => ({
+        name: String(key).slice(prefix.length),
+        size: rows[i].size,
+        mtime: rows[i].mtime,
+      }))
+      .filter((entry) => !entry.name.includes("/"))
+      .sort((a, b) => b.mtime - a.mtime);
+  },
+};
+
+/** the Mac app (or a browser it opened with its token) uses its own store */
+export const usesNativeStore = isNative || !!TOKEN;
+
+export const blobs = usesNativeStore ? nativeBlobs : browserBlobs;
+
+/** a stored image as a Blob (browser store only; the Mac app uses blobURL) */
+export const getStoredBlob = (path: string) =>
+  usesNativeStore ? Promise.resolve(null) : browserBlobs.getBlob(path);
+
+export const postNative = (
+  type: string,
+  payload: Record<string, unknown> = {},
+) => {
   window.webkit?.messageHandlers?.canvas?.postMessage({ type, ...payload });
 };
 

@@ -30,11 +30,11 @@ import {
 } from "./data/store";
 import { getSession } from "./editor/session";
 import { activeCollab } from "./collab/useCollab";
+import { joinSharedLink } from "./collab/join";
 import {
   createLink,
   listLinks,
   loadShare,
-  parseLink,
   revokeLink,
   saveShare,
   startSharing,
@@ -224,34 +224,9 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
 
   /** opens a share link: an existing copy, or a new scene that fills in */
   async joinShared(url: string) {
-    const link = parseLink(url);
-    if (!link) {
-      throw new Error("That doesn't look like a Canvas share link.");
-    }
-    for (const scene of getIndex().scenes) {
-      const info = await loadShare(scene.id);
-      if (info?.roomId === link.roomId) {
-        if (info.role !== "owner") {
-          await saveShare(scene.id, {
-            ...info,
-            key: link.key,
-            token: link.token,
-            ended: undefined,
-          });
-        }
-        navigate({ view: "scene", id: scene.id });
-        return scene.id;
-      }
-    }
-    const meta = await createScene({ name: "Shared scene" });
-    await saveShare(meta.id, {
-      roomId: link.roomId,
-      key: link.key,
-      token: link.token,
-      role: "view",
-    });
-    navigate({ view: "scene", id: meta.id });
-    return meta.id;
+    const id = await joinSharedLink(url);
+    navigate({ view: "scene", id });
+    return id;
   },
 };
 

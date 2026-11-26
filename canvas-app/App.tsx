@@ -1,24 +1,38 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { THEME, defaultLang, languages } from "@excalidraw/excalidraw";
 
+import type { Theme } from "@excalidraw/element/types";
+
 import { installBridge, setBridgeThemeSetter } from "./bridge";
 import { Editor } from "./editor/Editor";
 import { importSceneFile } from "./data/importExport";
-import { flushPendingNativeEvents, onNativeEvent, postNative } from "./data/native";
+import {
+  flushPendingNativeEvents,
+  isNative,
+  onNativeEvent,
+  postNative,
+} from "./data/native";
 import { createScene, loadIndex, loadPrefs, savePrefs } from "./data/store";
 import { installMCP } from "./mcp/mcp";
+import { WebHome } from "./web/Home";
+import { WebJoin } from "./web/Join";
 
 import type { Prefs } from "./data/store";
-import type { Theme } from "@excalidraw/element/types";
 
 // ---------------------------------------------------------------------------
 // routing: "/" is the scenes library (drawn by the native window), "/scene/<id>" an open scene. Paths, not
 // hashes, so that excalidraw's `#addLibrary=` links keep working anywhere.
 // ---------------------------------------------------------------------------
 
-export type Route = { view: "dashboard" } | { view: "scene"; id: string };
+export type Route =
+  | { view: "dashboard" }
+  | { view: "scene"; id: string }
+  | { view: "join" };
 
 const parseRoute = (): Route => {
+  if (/^\/s\/[\w-]+/.test(location.pathname)) {
+    return { view: "join" };
+  }
   const match = location.pathname.match(/^\/scene\/([\w-]+)/);
   return match ? { view: "scene", id: match[1] } : { view: "dashboard" };
 };
@@ -26,7 +40,12 @@ const parseRoute = (): Route => {
 const routeListeners = new Set<(r: Route) => void>();
 
 export const navigate = (route: Route) => {
-  const path = route.view === "scene" ? `/scene/${route.id}` : "/";
+  const path =
+    route.view === "scene"
+      ? `/scene/${route.id}`
+      : route.view === "join"
+      ? location.pathname
+      : "/";
   if (location.pathname !== path) {
     history.pushState(null, "", path + location.search);
   }
@@ -101,14 +120,11 @@ const useSettings = (prefs: Prefs | null): AppSettings => {
     document.documentElement.classList.toggle("dark", editorTheme === "dark");
   }, [editorTheme]);
 
-  const persist = useCallback(
-    (patch: Prefs) => {
-      loadPrefs()
-        .then((current) => savePrefs({ ...current, ...patch }))
-        .catch(console.error);
-    },
-    [],
-  );
+  const persist = useCallback((patch: Prefs) => {
+    loadPrefs()
+      .then((current) => savePrefs({ ...current, ...patch }))
+      .catch(console.error);
+  }, []);
 
   return {
     appTheme,
@@ -158,7 +174,9 @@ export const App = () => {
 
   useEffect(() => {
     if (ready) {
-      postNative("route", { sceneId: route.view === "scene" ? route.id : null });
+      postNative("route", {
+        sceneId: route.view === "scene" ? route.id : null,
+      });
     }
   }, [ready, route]);
 
@@ -190,7 +208,12 @@ export const App = () => {
     return null;
   }
 
-  return route.view === "scene" ? (
-    <Editor key={route.id} sceneId={route.id} settings={settings} />
-  ) : null;
+  if (route.view === "scene") {
+    return <Editor key={route.id} sceneId={route.id} settings={settings} />;
+  }
+  // the Mac app draws its own library; the website shows these instead
+  if (isNative) {
+    return null;
+  }
+  return route.view === "join" ? <WebJoin /> : <WebHome />;
 };

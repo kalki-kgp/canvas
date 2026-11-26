@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import "./canvas.scss";
+import "./web/web.scss";
 
 import { App } from "./App";
 
